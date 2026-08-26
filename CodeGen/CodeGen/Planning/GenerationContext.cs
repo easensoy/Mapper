@@ -88,6 +88,11 @@ namespace CodeGen.Translation
         // the prebuilt VueOne runner both take this type, so it stays reachable under its own name.
         public MapperConfig Config => Cfg.Paths;
 
+        // The declared FB types and deployment targets THIS run compiles against. Forwarded rather
+        // than rebuilt, so a planner cannot end up holding a different index from its own snapshot.
+        public Mapping.TemplateIndex Manifest => Cfg.Manifest;
+        public Mapping.TargetIndex Targets => Cfg.Targets;
+
         public DeploymentProfile Profile { get; }
 
         // Where each component runs and is drawn; on the profile, so nothing below reaches the catalog.
@@ -165,12 +170,13 @@ namespace CodeGen.Translation
         // so anything else the roster placed there would be planned onto a device the run never writes
         // and would silently run nowhere. The capability is declared per target; no controller is named.
         private static void AssertEveryPlacementHasADevice(
-            StationContents station, ControllerAllocation allocation, DeploymentProfile profile)
+            StationContents station, ControllerAllocation allocation, DeploymentProfile profile,
+            Mapping.TargetIndex targets)
         {
             if (profile.HasAssignments) return;                    // every declared target is emitted
             var absent = profile.Layout.Resources
                 .Select(r => r.Plc)
-                .Where(plc => TargetRegistry.Of(plc).ReceivesRelocatedComponents)
+                .Where(plc => targets.Of(plc).ReceivesRelocatedComponents)
                 .ToHashSet();
             if (absent.Count == 0) return;
 
@@ -231,7 +237,7 @@ namespace CodeGen.Translation
             {
                 var name = Role(role);
                 if (name == null) continue;
-                var template = TemplateManifest.ForInfraRole(role);
+                var template = Manifest.ForInfraRole(role);
                 var row = Roster.All.FirstOrDefault(e =>
                     string.Equals(e.Name, name, StringComparison.Ordinal))
                     ?? throw new InvalidOperationException(
@@ -258,7 +264,7 @@ namespace CodeGen.Translation
         // text. Feed may be hosted by M262 or, under a partial swap, by the RevPi.
         private ResourceCapabilities CapabilitiesOf(PlcAssignment plc)
         {
-            var target = TargetRegistry.Of(plc);
+            var target = Targets.Of(plc);
             return new ResourceCapabilities(
                 DeviceLocalCanvas:           target.DeviceLocalCanvas,
                 ReceivesRelocatedComponents: target.ReceivesRelocatedComponents,
@@ -268,15 +274,15 @@ namespace CodeGen.Translation
                 // this run relocated components here and their own process stayed where it was.
                 CarriesDetouredChain:        target.CarriesDetouredChain ||
                                              (target.ReceivesRelocatedComponents && Profile.HasAssignments),
-                HostsFeedRing:               target.HostsFeedStation && RingHost.Owns(target));
+                HostsFeedRing:               target.HostsFeedStation && Mapping.TargetIndex.OwnsRing(target));
         }
 
         // Whether this run emits a resource for that target at all. A target that only exists when
         // something is relocated onto it is not emitted when nothing is, so anything planned there would
         // be written to a device the run never creates.
         public bool Emits(PlcAssignment plc) =>
-            TargetRegistry.IsRegistered(plc) &&
-            (!TargetRegistry.Of(plc).ReceivesRelocatedComponents || Profile.HasAssignments);
+            Targets.IsRegistered(plc) &&
+            (!Targets.Of(plc).ReceivesRelocatedComponents || Profile.HasAssignments);
 
         private static readonly Dictionary<string, string> EmptyParameters = new(StringComparer.Ordinal);
 
@@ -367,20 +373,34 @@ namespace CodeGen.Translation
             if (components == null) throw new ArgumentNullException(nameof(components));
             // Resolve the twin first: a model whose references do not close is rejected here rather than
             // silently losing whatever the dangling reference asked for.
-            var twin = TwinModel.Build(components);
+            return Plan(config, TwinModel.Build(components), profile);
+        }
+
+        // THE PLAN, from an already-resolved twin. The composition root resolves the model once and
+        // hands the same IR to the capability report and to planning, so the two cannot describe
+        // different twins - and planning never re-reads the file it was compiled from.
+        public static GenerationContext Plan(Configuration.CompilerConfiguration config,
+            TwinModel twin, DeploymentProfile profile)
+        {
+            if (config == null) throw new ArgumentNullException(nameof(config));
+            if (profile == null) throw new ArgumentNullException(nameof(profile));
+            if (twin == null) throw new ArgumentNullException(nameof(twin));
+            // The twin preserves declaration order (TwinModel.Build appends as it walks), and that order
+            // is load-bearing: it is what allocates state_table slots sensors-first.
+            var components = twin.Components.Select(c => c.Source).ToList();
             var roster = new DeploymentRoster(profile);
             // Layout rows are overrides; everything else the twin declares is placed from the model.
             roster.PlaceUnlisted(twin);
             var allocation = new ControllerAllocation(roster);
 
             var station = ResolveStation(components, roster);
-            AssertEveryPlacementHasADevice(station, allocation, profile);
+            AssertEveryPlacementHasADevice(station, allocation, profile, config.Targets);
             // Every actuator the twin declares, decided once; the station set is a subset of it.
             var catTypeOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var c in twin.Components.Where(c => c.IsActuator).Select(c => c.Source))
             {
                 var n = (c.Name ?? string.Empty).Trim();
-                if (n.Length > 0) catTypeOf[n] = TemplateMap.ResolveActuatorCatType(c);
+                if (n.Length > 0) catTypeOf[n] = config.Manifest.ResolveActuatorCatType(c);
             }
             var catTypes = station.Actuators.ToDictionary(
                 a => a.Name.Trim(), a => catTypeOf[a.Name.Trim()], StringComparer.OrdinalIgnoreCase);
@@ -388,7 +408,7 @@ namespace CodeGen.Translation
             // declares that capability; nothing here names a controller.
             var carried = new HashSet<PlcAssignment>(
                 profile.Layout.Resources
-                    .Where(r => TargetRegistry.Of(r.Plc).CarriesDetouredChain)
+                    .Where(r => config.Targets.Of(r.Plc).CarriesDetouredChain)
                     .Select(r => r.Plc));
             var detouredChain = station.Actuators
                 .Select(a => (a.Name ?? string.Empty).Trim())
@@ -402,7 +422,7 @@ namespace CodeGen.Translation
                 StringComparer.OrdinalIgnoreCase);
 
             var rings = ReportGraph.Build(
-                twin, allocation, profile.Facts.CarrierSegment, detouredChain, graphs);
+                twin, allocation, profile.Facts.CarrierSegment, detouredChain, graphs, config.Targets);
             bool ringsMerged = rings.RingsMerged;
             var crossRingSegment = rings.DischargeSegment;
             // Every fixed slot the profile declares, from the one stableSlot column.
@@ -413,12 +433,12 @@ namespace CodeGen.Translation
             int topCover = profile.Facts.RingScopedSlotReporters
                 .Select(n => slots.TryGetValue(n, out int s) ? s : -1).FirstOrDefault(s => s >= 0, -1);
 
-            var recipeInputs = BuildRecipeInputs(twin, station, slots, rings, topCover, catTypeOf, profile.Facts);
+            var recipeInputs = BuildRecipeInputs(twin, station, slots, rings, topCover, catTypeOf, profile.Facts, config.Manifest);
             recipeInputs.Graphs = graphs;
-            var actuatorTiming = PlanActuatorTiming(config.Generation, twin, station, catTypeOf,
+            var actuatorTiming = PlanActuatorTiming(config.Generation, config.Manifest, twin, station, catTypeOf,
                 detouredChain, ringsMerged, profile.Facts);
             var interlocks = InterlockEmitter.PlanAll(
-                station.Actuators, catTypes, recipeInputs.Ids, twin, recipeInputs.Findings);
+                station.Actuators, catTypes, recipeInputs.Ids, twin, recipeInputs.Findings, config.Manifest);
             var handoffs = ProcessCompiler.HandoffPlan(recipeInputs);
 
             // Compile every process once, so the layout and the sysres mirror read the same rows.
@@ -439,7 +459,7 @@ namespace CodeGen.Translation
             // An FB has ONE owner. A target's declared broker and a roster row of the same name are two
             // statements about where it runs, and the mirror reads the roster first - so a contradiction
             // would silently place the broker on a resource its target never wired.
-            foreach (var target in TargetRegistry.All.Where(t => t.IoBroker != null))
+            foreach (var target in config.Targets.All.Where(t => t.IoBroker != null))
             {
                 var placed = allocation.Of(target.IoBroker!);
                 if (placed != PlcAssignment.Unknown && placed != target.Plc)
@@ -468,7 +488,7 @@ namespace CodeGen.Translation
         // Sensed means some other component's transition observes that arrival state, so a real DI
         // closes the wait; nothing observing it means only the CAT's own timer can acknowledge.
         private static IReadOnlyDictionary<string, ActuatorTiming> PlanActuatorTiming(
-            Configuration.GenerationConfig generation,
+            Configuration.GenerationConfig generation, Mapping.TemplateIndex manifest,
             TwinModel twin, StationContents station, IReadOnlyDictionary<string, string> catTypeOf,
             IReadOnlyList<string> detoured, bool ringsMerged, PlantFacts facts)
         {
@@ -492,7 +512,7 @@ namespace CodeGen.Translation
                 // declaration. A CAT that declares no stop vocabulary runs a handshake instead and
                 // carries no timing at all, so there is nothing here to decide for it.
                 var protocol = catTypeOf.TryGetValue(name, out var cat)
-                    ? TemplateManifest.ProtocolOrNull(cat) : null;
+                    ? manifest.ProtocolOrNull(cat) : null;
                 if (protocol == null || protocol.Stops.Count == 0) continue;
 
                 // SENSED means some OTHER component's transition observes that arrival, so a real DI
@@ -531,7 +551,7 @@ namespace CodeGen.Translation
                 // something is held, not a position DI that always toggles on arrival. The role comes
                 // from the twin (a Robot that is not the task arm), never from the instance name.
                 if (ringsMerged && ComponentType.Is(a, ComponentType.Robot)
-                    && !TemplateMap.IsRobotTaskArm(a)
+                    && !manifest.IsRobotTaskArm(a)
                     && !detoured.Contains(name, StringComparer.OrdinalIgnoreCase))
                     work = home = false;
 
@@ -544,7 +564,8 @@ namespace CodeGen.Translation
         // reporter writes and which instance fills the task-arm role.
         private static ProcessCompiler.Ctx BuildRecipeInputs(
             TwinModel twin, StationContents station, IReadOnlyDictionary<string, int> slots,
-            ReportGraph rings, int topCoverSlot, Dictionary<string, string> catTypeOf, PlantFacts facts)
+            ReportGraph rings, int topCoverSlot, Dictionary<string, string> catTypeOf, PlantFacts facts,
+            Mapping.TemplateIndex manifest)
         {
             var present = facts.SensorAssertedLevel;
 
@@ -568,7 +589,7 @@ namespace CodeGen.Translation
 
             var protocolOf = new Dictionary<string, CatProtocol>(StringComparer.OrdinalIgnoreCase);
             foreach (var kv in catTypeOf)
-                if (TemplateManifest.ProtocolOrNull(kv.Value) is { } proto) protocolOf[kv.Key] = proto;
+                if (manifest.ProtocolOrNull(kv.Value) is { } proto) protocolOf[kv.Key] = proto;
 
             // Which components run a declared command sequence rather than a walk to a numbered stop.
             // The CAT and the twin's own type decide it, so the compiler never has to know what a
@@ -576,7 +597,7 @@ namespace CodeGen.Translation
             var executionOf = new Dictionary<string, CatExecution>(StringComparer.OrdinalIgnoreCase);
             foreach (var c in twin.Components)
                 if (catTypeOf.TryGetValue(c.Name, out var cat) &&
-                    TemplateManifest.ExecutionFor(cat, c.Source?.Type) is { } exec)
+                    manifest.ExecutionFor(cat, c.Source?.Type) is { } exec)
                     executionOf[c.Name] = exec;
 
             return new ProcessCompiler.Ctx
@@ -587,6 +608,7 @@ namespace CodeGen.Translation
                 SensorPresent = present,
                 Twin = twin,
                 Rings = rings,
+                Manifest = manifest,
                 CatType = catTypeOf,
                 Protocol = protocolOf,
                 Execution = executionOf,
