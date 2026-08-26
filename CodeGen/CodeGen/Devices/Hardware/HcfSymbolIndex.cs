@@ -8,34 +8,38 @@ using System.Xml.Linq;
 
 namespace CodeGen.Translation
 {
-    public enum PlcAssignment
-    {
-        Unknown = 0,
-        M262 = 1,
-        M580 = 2,
-        BX1 = 3,
-        RevPi = 4,   // Revolution Pi (Soft_dPAC) — the alternate Feed-station host to M262
-    }
-
-    // Reverse index from a symlink symbol (e.g. RES0.M262IO.PusherAtHome) to the PLC that
-    // owns the .hcf binding. Resolution order: exact HCF match, then symbol prefix
-    // (RES0.M262IO.*/M580IO.*/BX1IO.*), then the deployment allocation.
+    // Reverse index from a symlink symbol (e.g. RES0.M262IO.PusherAtHome) to the target that owns the
+    // .hcf binding. Resolution order: exact HCF match, then the symbol's own scope, then the deployment
+    // allocation. Which file and which scope belong to a target is the target descriptor's answer.
     public class HcfSymbolIndex
     {
         private readonly Dictionary<string, PlcAssignment> _symbolToPlc =
             new(StringComparer.OrdinalIgnoreCase);
 
-        public Dictionary<PlcAssignment, string> LoadedHcfs { get; } = new();
+        // '<resource>.<scope>.<channel>': the scope is the authored hardware config's own name, which is
+        // how a binding not yet written into the file still resolves to the target that will own it.
+        private readonly Dictionary<string, PlcAssignment> _scopeToPlc =
+            new(StringComparer.OrdinalIgnoreCase);
 
-        public List<string> Warnings { get; } = new();
 
-        public static HcfSymbolIndex Build(MapperConfig cfg)
+
+        // REPORTED, not collected: an index that loaded nothing silently demotes every PLC partition
+        // to a name guess, and a list nobody reads is the same as no diagnostic at all.
+        private static void Warn(string message) =>
+            CodeGen.Services.MapperLogger.Warn($"[Hcf][Index] {message}");
+
+        public static HcfSymbolIndex Build(Configuration.CompilerConfiguration cfg)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
             var idx = new HcfSymbolIndex();
-            idx.AddHcf(cfg.M262HcfTemplatePath, PlcAssignment.M262);
-            idx.AddHcf(cfg.M580HcfTemplatePath, PlcAssignment.M580);
-            idx.AddHcf(cfg.BX1HcfTemplatePath, PlcAssignment.BX1);
+            var onDisk = cfg.Paths.HcfTemplatesByFileName;
+            foreach (var target in TargetRegistry.All)
+            {
+                var file = target.HcfTemplate;
+                if (string.IsNullOrWhiteSpace(file)) continue;   // a target with no authored config
+                idx._scopeToPlc[Path.GetFileNameWithoutExtension(file)] = target.Plc;
+                idx.AddHcf(onDisk.TryGetValue(file, out var path) ? path : null, target.Plc);
+            }
             return idx;
         }
 
@@ -43,19 +47,19 @@ namespace CodeGen.Translation
         {
             if (string.IsNullOrWhiteSpace(path))
             {
-                Warnings.Add($"{plc} HCF path not configured in mapper_config.json.");
+                Warn($"{plc} HCF path not configured in mapper_config.json.");
                 return;
             }
             if (!File.Exists(path))
             {
-                Warnings.Add($"{plc} HCF not found at {path}.");
+                Warn($"{plc} HCF not found at {path}.");
                 return;
             }
             XDocument doc;
             try { doc = XDocument.Load(path); }
             catch (Exception ex)
             {
-                Warnings.Add($"{plc} HCF failed to parse ({path}): {ex.Message}");
+                Warn($"{plc} HCF failed to parse ({path}): {ex.Message}");
                 return;
             }
 
@@ -78,9 +82,8 @@ namespace CodeGen.Translation
                 added++;
             }
 
-            LoadedHcfs[plc] = path;
             if (added == 0)
-                Warnings.Add(
+                Warn(
                     $"{plc} HCF at {path} loaded but yielded zero RES*-symbol bindings " +
                     "(file likely carries only EIP word routing). Fallback to prefix + " +
                     "name will be used for components on this PLC.");
@@ -92,10 +95,9 @@ namespace CodeGen.Translation
             var sym = symbol.Trim().Trim('\'');
             if (_symbolToPlc.TryGetValue(sym, out var plc)) return plc;
 
-            // Prefix fallback for bindings not yet written into the .hcf.
-            if (sym.Contains(".M262IO.", StringComparison.OrdinalIgnoreCase)) return PlcAssignment.M262;
-            if (sym.Contains(".M580IO.", StringComparison.OrdinalIgnoreCase)) return PlcAssignment.M580;
-            if (sym.Contains(".BX1IO.",  StringComparison.OrdinalIgnoreCase)) return PlcAssignment.BX1;
+            // Scope fallback for a binding not yet written into the .hcf.
+            foreach (var (scope, owner) in _scopeToPlc)
+                if (sym.Contains($".{scope}.", StringComparison.OrdinalIgnoreCase)) return owner;
             return PlcAssignment.Unknown;
         }
 
