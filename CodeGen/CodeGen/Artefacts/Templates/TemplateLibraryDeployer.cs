@@ -42,12 +42,12 @@ namespace CodeGen.Services
 
             // WHERE the deployed types live and HOW LONG to keep trying one EAE is holding open,
             // taken once from the run so every patch shares the one answer.
-            var scope = new FbtEditScope(eaeProjectDir, cfg.Generation.FileWriteRetries);
+            var scope = FbtEditScope.For(eaeProjectDir, cfg);
 
             // ExtractToEae is copy-if-absent, so delete first to force-re-extract anything later patches reshape.
             // An artefact left stale against a freshly reshaped CAT is an EAE "member/port does not exist" error.
             foreach (var ext in new[] { ".fbt", ".doc.xml", ".meta.xml" })
-            foreach (var basic in TemplateManifest.ForceRefresh(ArtefactKind.Basic))
+            foreach (var basic in ctx.Manifest.ForceRefresh(ArtefactKind.Basic))
             {
                 var stale = Path.Combine(eaeProjectDir, "IEC61499", basic + ext);
                 try { if (File.Exists(stale)) File.Delete(stale); }
@@ -55,7 +55,7 @@ namespace CodeGen.Services
                 { MapperLogger.Info($"[Deploy][Refresh] could not remove stale {stale}: {ex.Message}"); }
             }
 
-            foreach (var catRefresh in TemplateManifest.ForceRefresh(ArtefactKind.Cat))
+            foreach (var catRefresh in ctx.Manifest.ForceRefresh(ArtefactKind.Cat))
             {
                 var dir = Path.Combine(eaeProjectDir, "IEC61499", catRefresh);
                 try { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
@@ -63,27 +63,27 @@ namespace CodeGen.Services
                 { MapperLogger.Info($"[Deploy][Refresh] could not remove deployed CAT {dir}: {ex.Message}"); }
             }
 
-            foreach (var name in TemplateManifest.Deployed(ArtefactKind.Basic))
+            foreach (var name in ctx.Manifest.Deployed(ArtefactKind.Basic))
                 DeployArtifact(libPath, "Basic", name, eaeProjectDir, result, isBasic: true);
 
             SweepRetiredType(eaeProjectDir, "SimCentreHomeSensor_7SCH", result);
 
-            foreach (var name in TemplateManifest.Deployed(ArtefactKind.Adapter))
+            foreach (var name in ctx.Manifest.Deployed(ArtefactKind.Adapter))
                 DeployArtifact(libPath, "Adapter", name, eaeProjectDir, result, isBasic: true);
 
-            foreach (var name in TemplateManifest.Deployed(ArtefactKind.Composite))
+            foreach (var name in ctx.Manifest.Deployed(ArtefactKind.Composite))
                 DeployArtifact(libPath, "Composite", name, eaeProjectDir, result, isBasic: false);
 
-            foreach (var name in TemplateManifest.Deployed(ArtefactKind.HmiCat))
+            foreach (var name in ctx.Manifest.Deployed(ArtefactKind.HmiCat))
                 DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: false, isCat: true);
 
-            foreach (var name in TemplateManifest.Deployed(ArtefactKind.Cat))
+            foreach (var name in ctx.Manifest.Deployed(ArtefactKind.Cat))
                 DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: false, isCat: true);
 
             // Held back so their .dfbproj entries land after every other artefact of their kind.
-            foreach (var name in TemplateManifest.DeployedLast(ArtefactKind.Basic))
+            foreach (var name in ctx.Manifest.DeployedLast(ArtefactKind.Basic))
                 DeployArtifact(libPath, "Basic", name, eaeProjectDir, result, isBasic: true);
-            foreach (var name in TemplateManifest.DeployedLast(ArtefactKind.Cat))
+            foreach (var name in ctx.Manifest.DeployedLast(ArtefactKind.Cat))
                 DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: false, isCat: true);
 
             DeployArtifact(libPath, "Basic", "changeEventM262_2", eaeProjectDir, result, isBasic: true);
@@ -108,21 +108,21 @@ namespace CodeGen.Services
                 DeployArtifact(libPath, "Composite", "PLC_RW_REVPI", eaeProjectDir, result, isBasic: false);
                 // Internalise the Modbus symlink bridge so the RevPi sysres instantiates only RevPI_IO.
                     CodeGen.Devices.RevPi.RevPiIoBrokerInjector.EmbedBridgeInComposite(
-                        Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_REVPI.fbt"));
+                        Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_REVPI.fbt"), ctx.Targets);
 
             }
 
-            DeployDataTypes(libPath, eaeProjectDir, result);
+            DeployDataTypes(libPath, eaeProjectDir, result, cfg.Manifest);
             // Every FB that declares state_table gets the size THIS plan needs, together.
             PatchStateTableCapacity(scope, ctx.StateTableCapacity, result);
             // Sensor_Bool_CAT carries one SYMLINKMULTIVARDST and no SRC, so the general symlink-QI
             // patch IS this CAT's case; a second copy specialised to DST could only drift from it.
             // QI=TRUE on the SYMLINKMULTIVARDST/SRC or the subscriber is dropped and the core is
             // islanded from its IO. WHICH CATs need it is the CAT's own declaration, not a list here.
-            foreach (var cat in TemplateManifest.WithSymlinkQi)
+            foreach (var cat in ctx.Manifest.WithSymlinkQi)
                 PatchCatSymlinkQi(scope, cat.Name, result);
             EnsureFiveStateInputPoll(scope, cfg.Generation.ActuatorInputPollMs, result);
-            foreach (var cat in TemplateManifest.WithHmiFaceplate)
+            foreach (var cat in ctx.Manifest.WithHmiFaceplate)
                 FixCatHmiOpcuaFrame(eaeProjectDir, cat.Name, result);
             PatchSwivelStartup(scope, ctx, result);
             // Runs LAST: the directional brake rewrites the whole atHome algorithm.
@@ -132,7 +132,7 @@ namespace CodeGen.Services
             if (cfg.Telemetry.PublishEnabled)
             {
                 DeployMqttFormatter(cfg, eaeProjectDir, result);
-                foreach (var cat in TemplateManifest.WithTelemetryTap.Where(t => t.Role != TypeRole.Process))
+                foreach (var cat in ctx.Manifest.WithTelemetryTap.Where(t => t.Role != TypeRole.Process))
                     PatchCatMqttPublish(eaeProjectDir, cat.Name,
                         cat.Telemetry!.StateEventSource, cat.Telemetry.StateDataSource,
                         cat.Telemetry.InitSource, cat.Telemetry.TopicNameSource,
@@ -146,7 +146,7 @@ namespace CodeGen.Services
             // here rather than in the loop - the same injector, ordered after its source exists.
             if (cfg.Telemetry.PublishEnabled)
             {
-                var proc = TemplateManifest.ProcessType;
+                var proc = ctx.Manifest.ProcessType;
                 PatchCatMqttPublish(eaeProjectDir, proc.Name,
                     proc.Telemetry!.StateEventSource, proc.Telemetry.StateDataSource,
                     proc.Telemetry.InitSource, proc.Telemetry.TopicNameSource,
@@ -249,10 +249,10 @@ namespace CodeGen.Services
             {
                 // The feed host's authored hardware config. Which target that is, and which file it
                 // uses, are both declared; this stage copies whatever they name.
-                var feed = TargetRegistry.FeedTarget;
+                var feed = ctx.Targets.FeedTarget;
                 var hcf = HwConfigVerbatimCopier.CopyFor(
                     cfg, feed, cfg.Paths.HcfTemplatesByFileName.TryGetValue(
-                        TargetRegistry.Of(feed).HcfTemplate ?? string.Empty, out var authored)
+                        ctx.Targets.Of(feed).HcfTemplate ?? string.Empty, out var authored)
                         ? authored : null);
                 result.HcfPath = hcf.HcfPath;
                 foreach (var w in hcf.Warnings)
@@ -268,7 +268,8 @@ namespace CodeGen.Services
             return result;
         }
 
-        static void DeployDataTypes(string libPath, string eaeProjectDir, DeployResult result)
+        static void DeployDataTypes(string libPath, string eaeProjectDir, DeployResult result,
+            Mapping.TemplateIndex manifest)
         {
             var srcDir = Path.Combine(libPath, "DataType");
             if (!Directory.Exists(srcDir))
@@ -279,7 +280,7 @@ namespace CodeGen.Services
             var destDir = Path.Combine(eaeProjectDir, "IEC61499", "DataType");
             Directory.CreateDirectory(destDir);
 
-            foreach (var name in TemplateManifest.Deployed(ArtefactKind.DataType))
+            foreach (var name in manifest.Deployed(ArtefactKind.DataType))
             {
                 var src = Path.Combine(srcDir, name + ".dt");
                 if (!File.Exists(src))
@@ -303,7 +304,7 @@ namespace CodeGen.Services
         {
             try
             {
-                var dst = Path.Combine(eaeProjectDir, "IEC61499", TemplateManifest.FbtOf("mqttFormatter"));
+                var dst = Path.Combine(eaeProjectDir, "IEC61499", cfg.Manifest.FbtOf("mqttFormatter"));
                 File.WriteAllText(dst, TemplateDocument.Load(cfg,
                     @"Basic\MqttStateFormatter\IEC61499\MqttStateFormatter.fbt"));
                 result.PatchesApplied.Add("MqttStateFormatter.fbt deployed (INT→STRING[255] payload)");
