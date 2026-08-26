@@ -18,9 +18,9 @@ namespace CodeGen.Devices.M580
     {
         // The authored channel symlink name -> the component + CAT port it binds, from Config/smc-rig.yml.
         // The rig owns which channel carries which signal; this file only resolves ids and writes triples.
-        private static Dictionary<string, (string Comp, string Port)> ChannelMap(string? catType)
+        private static Dictionary<string, (string Comp, string Port)> ChannelMap(RigCatalog cat, string? catType)
         {
-            var cat = RigCatalog.Current;
+
             var m = new Dictionary<string, (string Comp, string Port)>(StringComparer.OrdinalIgnoreCase);
             foreach (var b in cat.M580Channels) m[b.Channel] = (b.Component, b.Port);
             // A two-position swivel and a centre-home one bind the same channels to different ports.
@@ -31,7 +31,7 @@ namespace CodeGen.Devices.M580
             return m;
         }
 
-        public static void BindM580(MapperConfig? config,
+        public static void BindM580(Configuration.CompilerConfiguration? config,
             SystemInjector.BindingApplicationReport report)
         {
             string Log(string m) { var s = $"[HcfBind][M580] {m}"; report.Missing.Add(s); return s; }
@@ -43,7 +43,7 @@ namespace CodeGen.Devices.M580
                 if (string.IsNullOrEmpty(eaeRoot)) { Log("skipped, could not derive EAE project root"); return; }
 
                 var sysdevFile = EaeProjectLayout.FindSysdevByDeviceType(
-                    eaeRoot, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.M580).DeviceType);
+                    eaeRoot, TargetRegistry.Of(CodeGen.Translation.PlcAssignment.Named("M580")).DeviceType);
                 if (sysdevFile == null) { Log("skipped, no deployed M580 sysdev (Type=M580_dPAC)"); return; }
 
                 var stem = Path.GetFileNameWithoutExtension(sysdevFile);
@@ -54,7 +54,7 @@ namespace CodeGen.Devices.M580
                 var (resId, resName) = HcfBindingSupport.ReadSysresIdentity(folder);
                 if (string.IsNullOrEmpty(resId)) { Log("skipped, deployed sysres ID not resolvable"); return; }
                 // resName is what EAE's $${PATH} macro resolves to as the leading symlink segment.
-                if (string.IsNullOrWhiteSpace(resName)) resName = CodeGen.Mapping.ControllerMap.ResourceForPlc(PlcAssignment.M580);
+                if (string.IsNullOrWhiteSpace(resName)) resName = TargetRegistry.Of(PlcAssignment.Named("M580")).ResourceName;
 
                 var compId = HcfBindingSupport.BuildComponentIdMap(folder);
                 if (compId.Count == 0)
@@ -71,11 +71,11 @@ namespace CodeGen.Devices.M580
                 // The swivel's ports follow whichever CAT its state graph selected, read back from the
                 // deployed FB Type; which component IS the swivel comes from the catalog's swivel rows.
                 var typeOf = HcfBindingSupport.BuildComponentTypeMap(folder);
-                var swivelComponent = RigCatalog.Current.SwivelChannels.CentreHome
-                    .Concat(RigCatalog.Current.SwivelChannels.TwoPosition)
+                var swivelComponent = config.Rig.SwivelChannels.CentreHome
+                    .Concat(config.Rig.SwivelChannels.TwoPosition)
                     .Select(b => b.Component).FirstOrDefault() ?? string.Empty;
                 typeOf.TryGetValue(swivelComponent, out var swivelCat);
-                var channelMap = ChannelMap(swivelCat);
+                var channelMap = ChannelMap(config.Rig, swivelCat);
 
                 int bound = 0, already = 0, unmapped = 0, missingComp = 0, literals = 0, blanked = 0;
                 var compFbIds   = new HashSet<string>(compId.Values, StringComparer.OrdinalIgnoreCase);
@@ -147,7 +147,7 @@ namespace CodeGen.Devices.M580
                         $"[HcfBind][M580] {chan}: symlink '{last}' not in the M580 channel map — left as-is");
                 }
 
-                if (bound > 0 || blanked > 0) HcfBindingSupport.SaveHcf(doc, hcfPath);
+                if (bound > 0 || blanked > 0) HcfBindingSupport.SaveHcf(doc, hcfPath, config.Generation.FileWriteRetries);
                 Log($"GUID-bound {bound} channel(s) to CAT ports (resource '{resName}' / {resId}); {already} already bound, " +
                     $"{unmapped} unmapped, {missingComp} missing-component, {literals} literal/empty. " +
                     "Form 1 direct GUID triple ('<resId>.<fbId>.<port>') — populates EAE's " +
