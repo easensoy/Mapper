@@ -95,7 +95,7 @@ namespace MapperTests
                 var ctx = Twin(suffix);
                 foreach (var (name, plan) in ctx.Interlocks)
                 {
-                    var range = TemplateManifest
+                    var range = TestConfig.Cfg.Manifest
                         .ProtocolOrNull(ctx.CatTypes.TryGetValue(name, out var cat) ? cat : string.Empty)
                         ?.RawStateRange;
                     if (range == null) continue;
@@ -186,13 +186,13 @@ namespace MapperTests
             var ctx = Twin("_se");
             var swivel = ctx.Components.First(c =>
                 string.Equals(c.Name, "Bearing_PnP", StringComparison.OrdinalIgnoreCase));
-            Assert.True(CodeGen.Translation.Interlocks.ActuatorStateEncoding.Geometric(swivel, ctx.CatTypes));
+            Assert.True(CodeGen.Translation.Interlocks.ActuatorStateEncoding.Geometric(swivel, ctx.CatTypes, ctx.Manifest));
 
             foreach (var group in swivel.States.Where(s => s.StaticState).GroupBy(s => s.Position))
             {
                 var numbers = group
                     .Select(s => CodeGen.Translation.Interlocks.ActuatorStateEncoding
-                        .CanonicalNumber(swivel, s, ctx.CatTypes))
+                        .CanonicalNumber(swivel, s, ctx.CatTypes, ctx.Manifest))
                     .Distinct().ToList();
                 Assert.Single(numbers);
             }
