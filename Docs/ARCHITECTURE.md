@@ -1,4 +1,4 @@
-# Architecture
+﻿# Architecture
 
 What VueOneMapper is, what it generates, and how the pieces fit together. Read
 this once before touching the code. Pair with `Docs/INVARIANTS.md` (the facts
@@ -140,7 +140,7 @@ timing. A model the backend cannot render throws HERE, which is before
 After the plan: deep clean, template deploy, application layer, then each
 registered target backend takes its turn (device, hardware config, resource
 wiring, channel binding), then the output validators. The pipeline itself names
-no controller - `TargetRegistry.Backends` does.
+no controller - `GenerateProject.Backends()` does, and `CompilerSession` checks that the set it returns matches what `device.yml` declares.
 
 ## 6. The CAT instance routing decision
 
