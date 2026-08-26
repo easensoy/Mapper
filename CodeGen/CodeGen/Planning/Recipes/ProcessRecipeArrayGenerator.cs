@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using static CodeGen.Translation.Process.Recipes.TransitionChainParser;
 using CodeGen.Configuration;
 using CodeGen.Models;
 using CodeGen.Mapping;
@@ -50,8 +49,6 @@ namespace CodeGen.Translation.Process
 
     public static class ProcessRecipeArrayGenerator
     {
-        public static int RecipeArraySize => GenerationConfig.Current.RecipeArraySize;
-
         // The same slots StateTableAllocation assigned, keyed by ComponentID. A projection, NOT a second
         // allocation: recipe Wait1Id, interlock SourceID and actuator_id are one number by construction.
         internal static Dictionary<string, int> ScopedIds(
@@ -68,18 +65,21 @@ namespace CodeGen.Translation.Process
         }
 
         // Everything topological is decided before this runs, so compiling a recipe is a pure function.
+        // capacity is the plan's, so a recipe is measured against the very limit the engine type is
+        // patched to. Asking a configuration file here could size it against a different one.
         internal static RecipeArrays Generate(VueOneComponent process, int processId,
-            Recipes.ProcessCompiler.Ctx inputs, Recipes.ProcessHandoffPlan handoffs)
+            Recipes.ProcessCompiler.Ctx inputs, Recipes.ProcessHandoffPlan handoffs, int capacity)
         {
             var arrays = Recipes.ProcessCompiler.Compile(process, inputs, handoffs);
 
             ValidateProcessIdInvariant(arrays, processId);
             ValidateSingleEndMarker(arrays);
             // EAE silently truncates a recipe past ArraySize -> the engine stalls on StepType=0.
-            if (arrays.StepType.Count > RecipeArraySize)
+            if (arrays.StepType.Count > capacity)
                 throw new InvalidOperationException(
-                    $"[Recipe] Recipe length {arrays.StepType.Count} exceeds template ArraySize " +
-                    $"{RecipeArraySize} (Process1_Generic.fbt / ProcessRuntime_Generic_v1.fbt).");
+                    $"[Recipe] Recipe length {arrays.StepType.Count} exceeds the declared recipe " +
+                    $"capacity {capacity}. Raise config.yaml recipeArraySize; the engine types are " +
+                    "patched to whatever it declares, so the two cannot disagree.");
             return arrays;
         }
 
