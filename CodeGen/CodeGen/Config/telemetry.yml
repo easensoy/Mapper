@@ -13,6 +13,12 @@ brokerUrl: mqtt://192.168.1.50:1883
 
 # false = insecure demo (mqtt://, device "Insecure Application" enabled). true = mqtts:// + TLS.
 secureTls: false
+
+# Broker ports that carry PLAIN MQTT, i.e. no TLS listener. Pointing mqtts:// at one of these makes
+# the handshake fail with MQTT_CONNECTION ReturnCode 100, so the validator refuses that combination
+# before it ships. Which ports a broker serves TLS on is a fact about the installation, not about
+# the generator, so it is declared rather than compiled in.
+plainMqttPorts: [1883, 1884]
 caCert: ""
 validateCert: 0
 
@@ -31,15 +37,18 @@ connectionName: SMC
 # client       broker ClientIdentifier -- unique per resource, or mosquitto evicts the duplicates
 # drawnAt      roster   = where the layout row for its instance name puts it
 #              bandHead = at the head of its target's band, above that station
-# broughtUpBy  the resource role whose INITO starts it: area, station, or ringHead (the head of the
-#              report ring this resource participates in, for a resource that has no infrastructure of
-#              its own). Omitted where the resource's own wiring already brings it up.
+# broughtUpBy  the resource role whose INITO starts it: area, station, ringHead (the head of the report
+#              ring this resource participates in, for a resource with no infrastructure of its own), or
+#              none, meaning this resource's own bring-up chain starts it. Both fields are typed: a value
+#              outside these fails the load rather than reading as a default and silently moving an FB or
+#              dropping an INIT wire.
 connections:
   - plc: BX1
     instance: Telemetry_BX1
     rawInstance: MqttConn
     client: SMC_BX1
     drawnAt: roster
+    broughtUpBy: none
   - plc: M262
     instance: Telemetry_M262
     rawInstance: MqttConn_M262
