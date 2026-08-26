@@ -75,7 +75,10 @@ namespace MapperUI
             base.OnLoad(e);
             StartLlmEngine();
             StartHealthPolling();
-            ValidatePortNamesOnStartup();
+            // The UI asks targets what they can serve, so it composes the same backends a run does -
+            // from the same list, so the grid can never describe a different set than Generate uses.
+            CodeGen.Mapping.TargetRegistry.UseBackends(CodeGen.Application.GenerateProject.Backends());
+            PopulateDeviceColumn();
             LogInputFolderContents();
             lblStatus.Text = "Ready";
 
@@ -121,29 +124,33 @@ namespace MapperUI
             }
         }
 
-        void ValidatePortNamesOnStartup()
+        // The selectable controllers ARE the registered targets, and what a relocation target can serve
+        // is its own coupler's answer. Both were baked into designer code, where neither could follow
+        // device.yml - a target added there was silently blanked and a component list went stale.
+        void PopulateDeviceColumn()
         {
-            try
-            {
-                var libRoot = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "Template Library");
-                libRoot = Path.GetFullPath(libRoot);
-                var mismatches = CodeGen.Translation.PortNameValidator.Validate(libRoot);
-                if (mismatches.Count == 0)
-                {
-                    AppendActivity($"[Startup] Port name validation passed against {libRoot}");
-                }
-                else
-                {
-                    AppendActivity($"[Startup] Port name validation found {mismatches.Count} issue(s):");
-                    foreach (var m in mismatches)
-                        AppendActivity($"  {m.FbType}: {m.Reason}");
-                }
-            }
-            catch (Exception ex)
-            {
-                AppendActivity($"[Startup] Port name validation skipped: {ex.Message}");
-            }
+            var targets = CodeGen.Mapping.TargetRegistry.All;
+            colDevice.Items.Clear();
+            foreach (var t in targets) colDevice.Items.Add(t.Plc.ToString());
+
+            var home = targets.FirstOrDefault(t => t.HostsFeedStation && !t.ReceivesRelocatedComponents);
+            var relocation = targets.FirstOrDefault(t => t.ReceivesRelocatedComponents);
+            colDevice.ToolTipText = relocation == null
+                ? "Hosting controller for this component."
+                : $"Hosting controller. Set a component to {relocation.Plc} to host it there instead of " +
+                  $"{home?.Plc.ToString() ?? "its home controller"}; only " +
+                  string.Join(", ", ServableBy(relocation.Plc)) +
+                  $" have IO on that target, and the rest stay put. " +
+                  $"{targets.Count} controllers are registered.";
         }
+
+        // What a target's own hardware can serve is the TARGET's answer. The UI reads it off the
+        // registered backend rather than naming a particular device's injector, so a project whose
+        // relocation host is different hardware needs no edit here.
+        static IReadOnlySet<string> ServableBy(CodeGen.Translation.PlcAssignment plc) =>
+            CodeGen.Mapping.TargetRegistry.Backends
+                .FirstOrDefault(b => b.Target == plc)?.ServableComponents
+            ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
@@ -264,11 +271,18 @@ namespace MapperUI
 
             try
             {
+                // The SAME configuration and placement the run is planned with, so the preview cannot
+                // show a different project than Generate writes.
+                var previewCfg = Cfg();
+                var previewProfile = CodeGen.Mapping.DeploymentProfile.Relocating(
+                    CollectRevPiSelection(), Declarations());
+
                 if (_stateTransitionTableForm == null || _stateTransitionTableForm.IsDisposed)
                     _stateTransitionTableForm = new StateTransitionTableForm(
-                        _loadedControlXmlPath, _loadedComponents);
+                        _loadedControlXmlPath, _loadedComponents, previewCfg, previewProfile);
                 else
-                    _stateTransitionTableForm.Reload(_loadedControlXmlPath, _loadedComponents);
+                    _stateTransitionTableForm.Reload(
+                        _loadedControlXmlPath, _loadedComponents, previewCfg, previewProfile);
 
                 _stateTransitionTableForm.Show(this);
                 _stateTransitionTableForm.BringToFront();
@@ -346,14 +360,15 @@ namespace MapperUI
                 AppendActivity($"[Startup] Input folder ({inputDir}):");
                 foreach (var f in files)
                 {
+                    // Which files are consumed is the CONFIGURATION's answer: retarget a path in
+                    // mapper_config.json and this log follows it. A table of file names here could
+                    // only report what the generator used to read.
                     var name = Path.GetFileName(f);
-                    string status = name.ToLowerInvariant() switch
-                    {
-                        "vueone_iec61499_mapping.xlsx" => "consumed (mapping rules)",
-                        "smc_rig_io_bindings.xlsx" => "consumed (IO bindings)",
-                        "appendix_a_iotab_newstop.docx" => "ignored (reference only)",
-                        _ => "ignored (unrecognised)"
-                    };
+                    var cfg = Cfg();
+                    string status =
+                        Same(name, cfg.MappingRulesPath) ? "consumed (mapping rules)"
+                        : Same(name, cfg.IoBindingsPath) ? "consumed (IO bindings)"
+                        : "not read by the generator";
                     AppendActivity($"  - {name}: {status}");
                 }
             }
@@ -362,6 +377,11 @@ namespace MapperUI
                 AppendActivity($"[Startup] Failed to enumerate Input folder: {ex.Message}");
             }
         }
+
+        // A configured path may be relative, absolute or bare; only its file name identifies the file.
+        static bool Same(string name, string? configuredPath) =>
+            !string.IsNullOrWhiteSpace(configuredPath) &&
+            string.Equals(name, Path.GetFileName(configuredPath), StringComparison.OrdinalIgnoreCase);
 
         // UI only: collect the inputs, hand them to the one generation path, show the result.
         async void btnTestStation1_Click(object sender, EventArgs e)
@@ -390,10 +410,10 @@ namespace MapperUI
 
                 lblStatus.Text = $"Ready  |  {result.BoundCount} I/O bound  |  {result.SyslayPath}";
                 MessageBox.Show(
-                    "IEC 61499 code generated for the SMC rig — end to end.\n\n" +
-                    "Feed_Station (M262)  →  Assembly / Disassembly (M580)  →  Covers (BX1)\n\n" +
+                    "IEC 61499 code generated — end to end.\n\n" +
                     "Process recipes, interlock safety tables and I/O bindings were emitted across\n" +
-                    $"all three controllers ({result.BoundCount} I/O channel(s) bound).\n\n" +
+                    $"{CodeGen.Mapping.TargetRegistry.All.Count} controller(s) " +
+                    $"({result.BoundCount} I/O channel(s) bound).\n\n" +
                     $"Demonstrator:\n{result.SyslayPath}\n\n" +
                     "Next: reload the solution in EAE, then Build and Deploy.",
                     "Generate IEC61499 Code", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -411,35 +431,43 @@ namespace MapperUI
             }
         }
 
-        // Every Feed component DEFAULTS to M262. The swappable set is read from the injector's own signal
-        // tables so it cannot drift from what PLC_RW_REVPI physically wires.
+        // The operator's selection, PASSED THROUGH. Whether a target can serve a component is that
+        // target's own answer and the compiler REFUSES a selection it cannot host; filtering it here
+        // silently overrode that refusal, so an unservable pick looked accepted and quietly did nothing.
         IReadOnlySet<string> CollectRevPiSelection()
         {
-            var picked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var kv in _deviceOverrides)
-            {
-                if (!string.Equals(kv.Value, "RevPi", StringComparison.OrdinalIgnoreCase)) continue;
-                if (CodeGen.Devices.RevPi.RevPiIoBrokerInjector.CoveredComponents.Contains(kv.Key))
-                    picked.Add(kv.Key);
-                else
-                    AppendActivity($"[Target][!] '{kv.Key}' cannot move to the RevPi — the Modbus coupler (PLC_RW_REVPI) exposes no IO for it; kept on M262.");
-            }
-            return picked;
+            var relocation = CodeGen.Mapping.TargetRegistry.All
+                .FirstOrDefault(t => t.ReceivesRelocatedComponents);
+            if (relocation == null) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            return _deviceOverrides
+                .Where(kv => string.Equals(kv.Value, relocation.Plc.ToString(), StringComparison.OrdinalIgnoreCase))
+                .Select(kv => kv.Key)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
 
-        // Logged on EVERY run: a pure-M262 run must be distinguishable from one whose RevPi picks were rejected.
-        void LogControllerChoice(IReadOnlySet<string> revpiComponents)
+        // Logged on EVERY run: a run that relocates nothing must be distinguishable from one that does.
+        // Every name comes from the registry or device.yml, so a controller added there is reported.
+        void LogControllerChoice(IReadOnlySet<string> relocated)
         {
-            if (revpiComponents.Count == 0)
+            var targets = CodeGen.Mapping.TargetRegistry.All;
+            var home = targets.FirstOrDefault(t => t.HostsFeedStation && !t.ReceivesRelocatedComponents);
+            var relocation = targets.FirstOrDefault(t => t.ReceivesRelocatedComponents);
+            if (relocated.Count == 0 || relocation == null)
             {
-                AppendActivity("[Target] Feed controller: M262 (no components routed to the RevPi).");
+                AppendActivity($"[Target] Feed controller: {home?.Plc.ToString() ?? "(none declared)"} " +
+                               "(nothing relocated).");
                 return;
             }
-            // Declared in device.yml, so the operator is told which components the selection dragged along.
-            var alwaysHosted = CodeGen.Configuration.DeviceConfig.Current.RevPi.AlwaysHosts;
-            var picked = revpiComponents.Where(c => !alwaysHosted.Contains(c, StringComparer.OrdinalIgnoreCase));
-            AppendActivity($"[Target] Feed controller: M262 + Revolution Pi (Soft_dPAC) — {string.Join(", ", picked)} + {string.Join(", ", alwaysHosted)} on the RevPi; M262 keeps the rest (4 controllers).");
-            AppendActivity($"[Target] RevPi endpoints: host {Cfg().RevPiHostIp} (Soft dPAC Manager :8080, EAE 'Manage Soft dPAC') / container {Cfg().RevPiTargetIp} (IEC 61499 runtime, EAE Deploy+Login target).");
+            var alwaysHosted = Declarations().Devices.AlwaysHostedBy(relocation.Plc);
+            var picked = relocated.Where(c => !alwaysHosted.Contains(c, StringComparer.OrdinalIgnoreCase));
+            AppendActivity(
+                $"[Target] Feed controller: {home?.Plc} + {relocation.Plc} — " +
+                $"{string.Join(", ", picked)} + {string.Join(", ", alwaysHosted)} on the {relocation.Plc}; " +
+                $"{home?.Plc} keeps the rest ({targets.Count} controllers).");
+            AppendActivity($"[Target] {relocation.Plc} endpoints: host {Cfg().RevPiHostIp} " +
+                           "(Soft dPAC Manager :8080, EAE 'Manage Soft dPAC') / container " +
+                           $"{Cfg().RevPiTargetIp} (IEC 61499 runtime, EAE Deploy+Login target).");
         }
 
         async Task LoadAndValidateAsync(string path)
@@ -466,12 +494,8 @@ namespace MapperUI
 
                 try
                 {
-                    bool hasActuator5 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 5);
-                    bool hasActuator7 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 7);
-                    bool hasSensor = _loadedComponents.Any(c => c.Type == "Sensor" && c.States.Count == 2);
-
                     foreach (var rule in MappingRuleEngine.GetRelevantRules(
-                        Cfg().MappingRulesPath, hasActuator5, hasActuator7, hasSensor))
+                        Cfg().MappingRulesPath, ShapesPresent(_loadedComponents)))
                         AddMappingRuleRow(rule);
                 }
                 catch (Exception ex)
@@ -490,10 +514,11 @@ namespace MapperUI
                 _populatingGrid = true;
                 try
                 {
+                // The SAME selection and placement the run is planned with, so the Device column
+                // cannot show a controller Generate would not use.
                 var roster = new CodeGen.Mapping.DeploymentRoster(
-                    new CodeGen.Mapping.DeploymentProfile(
-                        _deviceOverrides.Where(kv => kv.Value == "RevPi").Select(kv => kv.Key),
-                        CodeGen.Configuration.LayoutCatalog.Load()));
+                    CodeGen.Mapping.DeploymentProfile.Relocating(
+                        CollectRevPiSelection(), Declarations()));
                 foreach (var comp in _loadedComponents)
                 {
                     var vr = Validate(comp, validator);
@@ -503,8 +528,11 @@ namespace MapperUI
                     string dev = _deviceOverrides.TryGetValue(comp.Name, out var ov)
                         ? ov
                         : (reg?.Plc.ToString() ?? "");
-                    // An unmapped/unknown device is stored as null (blank) to avoid a DataError.
-                    string? devCell = (dev == "M262" || dev == "M580" || dev == "BX1" || dev == "RevPi") ? dev : null;
+                    // A device the registry does not know is stored as null (blank) to avoid a DataError.
+                    // Which controllers exist is device.yml's answer, so a target added there appears
+                    // here without an edit instead of being silently blanked by a list in the UI.
+                    string? devCell = CodeGen.Mapping.TargetRegistry.All
+                        .Any(t => string.Equals(t.Plc.ToString(), dev, StringComparison.Ordinal)) ? dev : null;
                     int idx = dgvComponents.Rows.Add(comp.Name, comp.Type, vr.TemplateName, devCell!);
                     var row = dgvComponents.Rows[idx];
                     Color bg = (rowIdx++ % 2 == 0) ? RowEven : RowOdd;
@@ -512,6 +540,10 @@ namespace MapperUI
                     row.DefaultCellStyle.ForeColor = Color.Black;
                     row.Cells[2].Style.ForeColor = vr.IsValid ? ColorTranslated : ColorDiscarded;
                     row.Cells[2].Style.BackColor = bg;
+                    // The reason a component was refused: computed for every failed row and, until now,
+                    // thrown away. The operator saw "No template found" and nothing about WHY.
+                    if (!vr.IsValid && vr.FailReason.Length > 0)
+                        row.Cells[2].ToolTipText = vr.FailReason;
                 }
                 }
                 finally { _populatingGrid = false; }
@@ -525,15 +557,14 @@ namespace MapperUI
                 SetValidationLabel(ok ? "PASSED" : "FAILED", ok ? Color.Green : Color.Red);
                 lblStatus.Text = ok ? "Validation passed." : "Validation failed.";
 
-                var noTemplate = _validationRows
-                    .Where(r => r.TemplateName.StartsWith("No template found"))
-                    .ToList();
-
+                var noTemplate = _validationRows.Where(r => !r.IsValid).ToList();
                 if (noTemplate.Count > 0)
                 {
                     AppendActivity(
                         $"{noTemplate.Count} component(s) have no template and can be generated by the LLM Engine: " +
                         string.Join(", ", noTemplate.Select(r => r.Component.Name)));
+                    foreach (var r in noTemplate.Where(r => r.FailReason.Length > 0))
+                        AppendActivity($"  - {r.Component.Name}: {r.FailReason}");
                 }
             }
             catch (Exception ex)
@@ -552,11 +583,9 @@ namespace MapperUI
                 IEnumerable<MappingRuleEntry> rules;
                 if (_loadedComponents.Count > 0)
                 {
-                    bool hasActuator5 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 5);
-                    bool hasActuator7 = _loadedComponents.Any(c => c.Type == "Actuator" && c.States.Count == 7);
-                    bool hasSensor = _loadedComponents.Any(c => c.Type == "Sensor" && c.States.Count == 2);
+
                     rules = MappingRuleEngine.GetRelevantRules(
-                        Cfg().MappingRulesPath, hasActuator5, hasActuator7, hasSensor);
+                        Cfg().MappingRulesPath, ShapesPresent(_loadedComponents));
                 }
                 else
                 {
@@ -613,48 +642,56 @@ namespace MapperUI
         }
 
 
+        // The grid REPORTS the compiler's decision; it does not make one. Which shapes a CAT serves is
+        // declared in templates.yml and answered by TemplateMap/TemplateManifest, so a CAT added there
+        // shows up here with no edit - and the row can never name a template the run would not emit.
         static ComponentValidationRow Validate(VueOneComponent comp, ComponentValidator validator)
         {
-            switch (comp.Type.ToLowerInvariant())
+            if (ComponentType.IsProcess(comp))
+                return Pass(comp, CatFile(TemplateManifest.ProcessType.Name));
+
+            if (ComponentType.IsSensor(comp))
             {
-                case "process": return Pass(comp, ProcessCatFile);
-                case "robot":
-                    // Type=Robot is a category: the task arm gets Robot_Task_CAT, grippers route as usual.
-                    if (TemplateMap.IsRobotTaskArm(comp))
-                        return Pass(comp, "Robot_Task_CAT.fbt");
-                    if (comp.States.Count != 5)
-                        return Fail(comp, "No template found",
-                            $"Robot '{comp.Name}' has {comp.States.Count} states — expected 5 (gripper) or 7 (task arm)");
-                    return Pass(comp, ResolvedCatFile(comp));
-                case "actuator":
-                    if (comp.States.Count is not (4 or 5 or 7)
-                        && !TemplateMap.IsBranchedSevenState(comp))
-                        return Fail(comp, "No template found",
-                            $"{comp.States.Count} states — only 4, 5, or 7 (incl. PARALLEL+ALTERNATIVE branched) supported");
-                    return Pass(comp, ResolvedCatFile(comp));
-                case "sensor":
-                    if (comp.States.Count != 2)
-                        return Fail(comp, "No template found",
-                            $"{comp.States.Count} states, not 2");
-                    break;
-                default:
-                    return Fail(comp, "No template found", $"Unknown type '{comp.Type}'");
+                var sensorFile = CatFile(TemplateManifest.SensorType.Name);
+                var vr = validator.Validate(comp);
+                return vr.IsValid
+                    ? Pass(comp, sensorFile)
+                    : Fail(comp, sensorFile, vr.Summary);
             }
 
-            var vr = validator.Validate(comp);
-            return vr.IsValid
-                ? Pass(comp, SensorCatFile)
-                : Fail(comp, SensorCatFile, string.Join("; ", vr.Errors));
+            if (!ComponentType.IsActuator(comp) && !ComponentType.Is(comp, ComponentType.Robot))
+                return Fail(comp, NoTemplate, $"Unknown type '{comp.Type}'");
+
+            // The one component -> FB Type decision, asked of its owner. Its refusal message already
+            // says which shapes ARE served, so the grid shows that rather than a second rule here.
+            try
+            {
+                return Pass(comp, CatFile(TemplateMap.ResolveActuatorCatType(comp)));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Fail(comp, NoTemplate, ex.Message);
+            }
         }
 
-        // The types the deployer actually emits, so the grid names the CAT that is generated.
-        const string ProcessCatFile = "Process1_Generic.fbt";
-        const string SensorCatFile = "Sensor_Bool_CAT.fbt";
+        // Which CATs this twin actually needs, answered by the one resolver the run uses. A shape no
+        // CAT serves is not this grid's decision to make, so it is skipped rather than misreported.
+        static IEnumerable<string> ShapesPresent(IEnumerable<VueOneComponent> components)
+        {
+            var names = new List<string>();
+            foreach (var c in components)
+            {
+                if (ComponentType.IsSensor(c)) { names.Add(TemplateManifest.SensorType.Name); continue; }
+                if (!ComponentType.IsActuator(c) && !ComponentType.Is(c, ComponentType.Robot)) continue;
+                try { names.Add(TemplateMap.ResolveActuatorCatType(c)); }
+                catch (InvalidOperationException) { }
+            }
+            return names;
+        }
 
-        // TemplateMap owns the routing, so the displayed CAT can never drift from the emitted one.
-        static string ResolvedCatFile(VueOneComponent c) =>
-            TemplateMap.ResolveActuatorCatType(
-                c.Name, c.States.Count, TemplateMap.IsBranchedSevenState(c)) + ".fbt";
+        const string NoTemplate = "No template found";
+
+        static string CatFile(string typeName) => typeName + ".fbt";
 
         static ComponentValidationRow Pass(VueOneComponent c, string t) =>
             new() { Component = c, TemplateName = t, IsValid = true };
@@ -685,34 +722,42 @@ namespace MapperUI
             if (string.IsNullOrEmpty(comp)) return;
             _deviceOverrides[comp] = dev;
             RefreshDeviceSummary();
-            bool swappable = string.Equals(dev, "RevPi", StringComparison.OrdinalIgnoreCase) &&
-                             CodeGen.Devices.RevPi.RevPiIoBrokerInjector.CoveredComponents.Contains(comp);
+            // Which target receives relocated components, and which components its coupler can serve,
+            // are both the compiler's answers - naming either here is a second one that can contradict it.
+            bool relocating = IsRelocationTarget(dev);
+            var servable = ServableBy(CodeGen.Translation.PlcAssignment.Named(dev));
             AppendActivity($"[UI] Device set: {comp} -> {dev}" +
-                (string.Equals(dev, "RevPi", StringComparison.OrdinalIgnoreCase)
-                    ? swappable
-                        ? " (applied at Generate: this component moves to the Revolution Pi)."
-                        : " — IGNORED at Generate: the RevPi Modbus coupler carries no IO for this component; only Feeder/Checker are swappable."
+                (relocating
+                    ? servable.Contains(comp)
+                        ? $" (applied at Generate: this component moves to the {dev})."
+                        : $" — IGNORED at Generate: the {dev} coupler carries no IO for this component. " +
+                          $"It serves: {string.Join(", ", servable)}."
                     : "."));
         }
 
+        // One count per REGISTERED target, in declaration order. A controller added to device.yml is
+        // counted here without an edit; a per-controller counter could only omit it.
         void RefreshDeviceSummary()
         {
-            int cM262 = 0, cM580 = 0, cBx1 = 0, cRevPi = 0;
+            var counts = CodeGen.Mapping.TargetRegistry.All
+                .ToDictionary(t => t.Plc.ToString(), _ => 0, StringComparer.Ordinal);
             foreach (DataGridViewRow r in dgvComponents.Rows)
             {
-                switch (r.Cells[colDevice.Index].Value?.ToString())
-                {
-                    case "M262":  cM262++;  break;
-                    case "M580":  cM580++;  break;
-                    case "BX1":   cBx1++;   break;
-                    case "RevPi": cRevPi++; break;
-                }
+                var dev = r.Cells[colDevice.Index].Value?.ToString();
+                if (dev != null && counts.ContainsKey(dev)) counts[dev]++;
             }
+            var shown = counts.Where(kv => kv.Value > 0 || !IsRelocationTarget(kv.Key))
+                              .Select(kv => $"{kv.Key}: {kv.Value}");
             grpMappingInfo.Text =
-                $"Mapping Information   —   M262: {cM262} · M580: {cM580} · BX1: {cBx1}"
-                + (cRevPi > 0 ? $" · RevPi: {cRevPi}" : "")
-                + " mapped component(s)";
+                "Mapping Information   —   " + string.Join(" · ", shown) + " mapped component(s)";
         }
+
+        // A target that only ever receives relocated components has nothing on it until something is
+        // moved there, so it is left out of the summary until it does.
+        static bool IsRelocationTarget(string plc) =>
+            CodeGen.Mapping.TargetRegistry.All.Any(t =>
+                string.Equals(t.Plc.ToString(), plc, StringComparison.Ordinal) &&
+                t.ReceivesRelocatedComponents);
 
         // Designer anchors don't stretch the body to full width on some DPI/AutoScale configs, so size it here.
         protected override void OnClientSizeChanged(EventArgs e)
@@ -776,6 +821,12 @@ namespace MapperUI
         }
 
         MapperConfig Cfg() => _mapperConfig ??= MapperConfig.Load();
+
+        // THE UI's COMPOSITION ROOT. Read once per window, so the grid, the preview and the run all
+        // describe the same configuration; a second read could show a project Generate would not write.
+        CodeGen.Configuration.CompilerConfiguration Declarations() =>
+            _declarations ??= CodeGen.Configuration.CompilerConfiguration.Load(Cfg());
+        CodeGen.Configuration.CompilerConfiguration? _declarations;
 
 
         static void ShowError(string msg) =>
