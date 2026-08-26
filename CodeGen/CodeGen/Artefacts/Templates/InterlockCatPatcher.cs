@@ -110,7 +110,7 @@ namespace CodeGen.Services
         // The same fold on the evaluator, plus rewriting its algorithms to Target.Work1/Work2/Home.
         internal static void NormalizeCommonInterlockEvaluatorTargets(
             FbtEditScope scope, DeployResult result)
-            => EditDeployedFbt(scope, CodeGen.Mapping.TemplateManifest.FbtOf("interlockEvaluator"), "CommonInterlockEvaluator Target normalize failed", result,
+            => EditDeployedFbt(scope, scope.Manifest.FbtOf("interlockEvaluator"), "CommonInterlockEvaluator Target normalize failed", result,
                 (doc, root, ns, fbt) =>
             {
                 var iface = root.Element(ns + "InterfaceList");
@@ -289,7 +289,7 @@ namespace CodeGen.Services
         // The same collapse on the evaluator, across InputVars, event With lists AND the Evaluate ST.
         internal static void NormalizeCommonInterlockEvaluatorRules(
             FbtEditScope scope, DeployResult result)
-            => EditDeployedFbt(scope, CodeGen.Mapping.TemplateManifest.FbtOf("interlockEvaluator"), "CommonInterlockEvaluator RuleTable normalize failed", result,
+            => EditDeployedFbt(scope, scope.Manifest.FbtOf("interlockEvaluator"), "CommonInterlockEvaluator RuleTable normalize failed", result,
                 (doc, root, ns, fbt) =>
             {
 
@@ -381,14 +381,14 @@ namespace CodeGen.Services
                 DeployInterlockRuleDatatype(cfg, scope, result);
                 DeployInterlockTableDatatype(cfg, scope, capacity, result);
             }
-            NormalizeFiveStateRuleArrays(scope, CodeGen.Mapping.TemplateManifest.FbtOf("fiveStateCat"), "InterlockManager", result);
-            NormalizeFiveStateRuleArrays(scope, CodeGen.Mapping.TemplateManifest.FbtOf("centreHomeCat"), "CommonInterlockManager", result);
+            NormalizeFiveStateRuleArrays(scope, scope.Manifest.FbtOf("fiveStateCat"), "InterlockManager", result);
+            NormalizeFiveStateRuleArrays(scope, scope.Manifest.FbtOf("centreHomeCat"), "CommonInterlockManager", result);
             NormalizeCommonInterlockEvaluatorRules(scope, result);
 
             DeployTargetStatesDatatype(cfg, scope, result);
-            NormalizeTargetStates(scope, CodeGen.Mapping.TemplateManifest.FbtOf("fiveStateCat"), "InterlockManager",
+            NormalizeTargetStates(scope, scope.Manifest.FbtOf("fiveStateCat"), "InterlockManager",
                 new[] { "TargetWork1State", "TargetHomeState" }, result);
-            NormalizeTargetStates(scope, CodeGen.Mapping.TemplateManifest.FbtOf("centreHomeCat"), "CommonInterlockManager",
+            NormalizeTargetStates(scope, scope.Manifest.FbtOf("centreHomeCat"), "CommonInterlockManager",
                 new[] { "TargetWork1State", "TargetWork2State", "TargetHomeState" }, result);
             NormalizeCommonInterlockEvaluatorTargets(scope, result);
         }
@@ -422,7 +422,7 @@ namespace CodeGen.Services
         static List<string> FindInterlockInterfaceMismatches(FbtEditScope scope)
         {
             var mismatches = new List<string>();
-            var evalPath = FindDeployedFbt(scope.Root, CodeGen.Mapping.TemplateManifest.FbtOf("interlockEvaluator"));
+            var evalPath = FindDeployedFbt(scope.Root, scope.Manifest.FbtOf("interlockEvaluator"));
             if (string.IsNullOrEmpty(evalPath)) return mismatches;   // absent -> nothing to check
             HashSet<string> evalInputs;
             try
@@ -437,8 +437,8 @@ namespace CodeGen.Services
             if (evalInputs.Count == 0) return mismatches;
 
             foreach (var (cat, fb) in new[] {
-                (CodeGen.Mapping.TemplateManifest.FbtOf("fiveStateCat"), "InterlockManager"),
-                (CodeGen.Mapping.TemplateManifest.FbtOf("centreHomeCat"), "CommonInterlockManager") })
+                (scope.Manifest.FbtOf("fiveStateCat"), "InterlockManager"),
+                (scope.Manifest.FbtOf("centreHomeCat"), "CommonInterlockManager") })
             {
                 var catPath = FindDeployedFbt(scope.Root, cat);
                 if (string.IsNullOrEmpty(catPath)) continue;
