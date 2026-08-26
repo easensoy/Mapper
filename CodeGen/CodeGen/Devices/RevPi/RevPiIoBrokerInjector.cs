@@ -65,8 +65,8 @@ namespace CodeGen.Devices.RevPi
         public static string BrokerFbId => Current.BrokerFbId;
 
         // Called by the deployer once the pristine coupler type is in place, so the resource holds only the broker.
-        public static void EmbedBridgeInComposite(string fbtPath) =>
-            EmbedBridge(Current, TargetRegistry.Of(PlcAssignment.Named("RevPi")).ResourceName, fbtPath);
+        public static void EmbedBridgeInComposite(string fbtPath, Mapping.TargetIndex targets) =>
+            EmbedBridge(Current, targets.Of(PlcAssignment.Named("RevPi")).ResourceName, fbtPath);
 
         static Coupler? _current;
         internal static Coupler Current => _current ??= Resolve(MapperConfig.Load().TemplateLibraryPath);
