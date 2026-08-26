@@ -61,9 +61,10 @@ The swivel ships as `Seven_State_Actuator_Centre_Home_CAT` over
 emitter parameterises `process_state_name` any more, and there is no
 `SevenStateActuator2.fbt` in the Template Library. What replaced it: the CAT is
 selected from the twin's state graph (`TemplateMap.ResolveActuatorCatType`) and
-its command vocabulary is declared in `Config/smc-rig.yml`. The historical text
-is kept below because a `SevenStateActuator2` row still stands in
-`TemplateManifest`, and anyone reviving that type inherits this trap.
+its command vocabulary is declared in `Config/templates.yml`. The `SevenStateActuator2` row was
+deleted from the catalogue on 2026-08-25 (c) - no archive backs it - so the
+type is gone from the manifest as well as from the shipped path. The
+historical text is kept because anyone reviving it inherits this trap.
 
 ### Historical: `SevenStateActuator2` ECC gated every commanded transition on `process_state_name = actuator_name`
 
@@ -109,8 +110,8 @@ Sites that read it:
 
 - `SystemLayoutInjector.cs:~1601` — CAT type routing in the actuator-type
   helper above `IsBranchedSevenState`.
-- `SystemLayoutInjector.cs:~2237` — `BuildStation2Wiring.stationChain` Seven
-  exclusion.
+- `ResourceWiringPlan.cs` — the CaS-chain filter (the syslay-side successor of
+  `BuildStation2Wiring.stationChain`, deleted 2026-08-25 (c)).
 - `SystemLayoutInjector.cs:~1664` — `BuildMinimalActuatorParameters` Seven
   branch (TargetPick/Place/Home + process_state_name params).
 - `ProcessRecipeArrayGenerator.cs:~1196` — `IsFiveStateCommandable` (Seven
@@ -138,9 +139,12 @@ sites = silently broken deploy.
 - `ResourceWireEmitter.cs:~107-108` — sysres side: `NoStationAdapterTypes = {
   "Seven_State_Actuator_CAT" }`. Used by `HasStationAdapter` to skip Seven from
   the CaSBus chain.
-- `SystemLayoutInjector.cs:~2230-2240` — syslay side: `BuildStation2Wiring`
-  `stationChain` loop now mirrors this by skipping Seven (since 2026-05-30).
-  Before that, the syslay hardcoded `"Five_State_Actuator_CAT"` for all M580
+- `ResourceWiringPlan.cs` — syslay side: `ResourceWiringPlanner.For` filters
+  the CaS chain with `TemplateMap.LacksStationAdapter`, which reads the same
+  `stationAdapter` column. Since 2026-08-25 (c) ONE planner serves every target
+  (`BuildFeedStationWiring`/`BuildStation2Wiring`/`BuildBx1Wiring` are deleted),
+  so the two sides can no longer disagree about who is on the chain. Before
+  2026-05-30 the syslay hardcoded `"Five_State_Actuator_CAT"` for all M580
   actuators and dangled `Bearing_PnP.stationAdptr_in/out` on a Seven instance
   that has no such port.
 
@@ -285,7 +289,8 @@ silently fails to advance, with no error message.
 
 ## I-14. The `stateRprtCmd` ring is the **only** command channel from `Process1_Generic` to actuators
 
-**Where:** `SystemLayoutInjector.cs:~2254-2272` (`BuildStation2Wiring` ring loop).
+**Where:** `ResourceWiringPlan.cs` (`ResourceWiringPlanner.For`, the report-ring
+block) and `RingWiringPlanner.Render`, which draws it.
 The Five_State CAT and the surgical Seven_State CAT both expose
 `stateRprtCmd_in/out` adapter sockets/plugs. The Process commands every
 actuator over this ring; updateComponentState on the actuator side matches by
@@ -319,6 +324,57 @@ wrong. Run both.
 dotnet test MapperTests/MapperTests.csproj
 dotnet build Gate/Gate.csproj && Gate/bin/Debug/net10.0/gate.exe all
 ```
+
+---
+
+## I-19. A process state has ONE successor, and every guard leaf is accounted for
+
+**Where:** `Domain/Twin/ProcessGraph.cs` (`Build`), and
+`Planning/Recipes/GuardCoverage.cs` proved in `GenerationContext.Plan`.
+
+**Why it matters:** the deployed recipe engine executes a linear row list with
+one `NextStep` per row. It expresses a LOOP (an arbitrary back-edge) but has no
+branch row: nothing in `RecipeStep` can say "go to X if this guard holds,
+otherwise to Y". So a process state with two outgoing transitions cannot be
+lowered without discarding one, and `ProcessGraph.Build` REFUSES it by name
+before any file is written. The same build refuses a process with no
+`Initial_State` or with two, a transition with no destination, and a
+destination that is not a state of that process; it REPORTS a state the entry
+cannot reach, because such a state never executes.
+
+`GuardCoverage` is the other half. Every `<Condition>` the twin writes must end
+as one of: a WAIT row, a requirement already standing in the recipe, a
+requirement proved by the command that drove the component there, an outcome a
+DECLARATION authorises, an unreachable state, or a self-reference. A leaf that
+reaches none of those stops the run — a control semantic that reaches nothing is
+a defect, not a warning.
+
+**What breaks if you change it:** serialising the higher-priority branch and
+dropping the other ships a plant that silently ignores half its own model; and
+any new `return` in the guard lowering that does not record an outcome fails the
+coverage proof rather than quietly losing a condition.
+
+---
+
+## I-20. A cross-process reference the recipe cannot simply wait for is answered by a DECLARATION
+
+**Where:** `Config/smc-rig.yml` `handoff:`, read as `PlantFacts.Handoff` and
+applied in `ProcessCompiler.EmitHandoff`.
+
+**Why it matters:** two cases have no single right answer, and each reading
+drives the plant differently. A reference to a producer's ENTRY phase can mean
+"that station is boot-ready" or "that station reached a runtime phase"
+(`peerEntryPhase: readinessAssertion | runtimePhase`). And a MATERIAL carrier
+reports that material arrived, while a PHASE reports that a producer got
+somewhere — different propositions, so a carrier may stand in for a phase only
+where `handoff.carriers` says the two coincide on this plant, and says why.
+Undeclared is REFUSED in both cases.
+
+**What breaks if you change it:** the shipped profile declares
+`readinessAssertion` and authorises NO carrier, so any cross-controller phase
+with no transport stops the run. Removing the refusal restores the old
+behaviour, where a material level silently stood in for a process phase and the
+generated project looked correct.
 
 ---
 
