@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -171,7 +171,7 @@ namespace MapperTests
             {
                 var process = new HmiProcess(
                     ComponentId: "C-line", InstanceName: "Line_Process", DisplayName: "Line Process",
-                    Controller: CodeGen.Translation.PlcAssignment.M262, Resource: "RES0",
+                    Controller: CodeGen.Translation.PlcAssignment.Named("M262"), Resource: "RES0",
                     TagName: "TAG1", CatType: "Process1_Generic", Slot: 4,
                     Owned: new[] { "Pusher" },
                     Capabilities: new[]
