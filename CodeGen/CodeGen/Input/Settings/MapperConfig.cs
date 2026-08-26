@@ -33,38 +33,37 @@ namespace CodeGen.Configuration
 
         public string IoBindingsPath { get; set; } = "Input/SMC_Rig_IO_Bindings.xlsx";
 
-        public string M262TargetIp { get; set; } = DeviceConfig.Current.M262.TargetIp;
+        public string M262TargetIp => DeviceConfig.Current.M262.TargetIp;
 
         public string M262LogicalNetworkName { get; set; } = "DeviceNetwork_1";
 
         // EAE constraint: a device with no concrete IP is not listed in Deploy & Diagnostic, so this must be a real address, not a placeholder.
-        public string M580TargetIp { get; set; } = DeviceConfig.Current.M580.TargetIp;
+        public string M580TargetIp => DeviceConfig.Current.M580.TargetIp;
 
         // The M580 endpoint binding and the BroadcastDomain JSON cross-reference one uuid, so it is
         // written once. Must match Topology/BroadcastDomain_Default Network.json. M262 is intentionally
         // left on NOCONF -- do not touch it.
-        const string DefaultNetworkDomainUuid = "2131fbdd-0a41-4e41-abfb-a14a5ca9218d";
 
-        public string M580BroadcastDomainUuid { get; set; } = DefaultNetworkDomainUuid;
+        public string M580BroadcastDomainUuid => DeviceConfig.Current.DefaultNetwork.DomainUuid;
 
-        public string DefaultNetworkSubnetAddress { get; set; } = DeviceConfig.Current.DefaultNetwork.SubnetAddress;
+        public string DefaultNetworkSubnetAddress => DeviceConfig.Current.DefaultNetwork.SubnetAddress;
 
-        public string DefaultNetworkSubnetMask { get; set; } = DeviceConfig.Current.DefaultNetwork.SubnetMask;
+        public string DefaultNetworkSubnetMask => DeviceConfig.Current.DefaultNetwork.SubnetMask;
 
-        public string DefaultNetworkGateway { get; set; } = DeviceConfig.Current.DefaultNetwork.Gateway;
+        public string DefaultNetworkGateway => DeviceConfig.Current.DefaultNetwork.Gateway;
 
-        public string DefaultNetworkUuid { get; set; } = DefaultNetworkDomainUuid;
+        public string DefaultNetworkUuid => DeviceConfig.Current.DefaultNetwork.DomainUuid;
 
         // BX1 softdpac runtime IP (EAE deploys/logs in here); same Deploy & Diagnostic real-IP constraint as M580.
-        public string BX1TargetIp { get; set; } = DeviceConfig.Current.Bx1.TargetIp;
+        public string BX1TargetIp => DeviceConfig.Current.Bx1.TargetIp;
 
         // HMIB1X panel host IP: setting this makes BX1 a REMOTE panel not a local Workstation (whose runtime EAE resolves to 127.0.0.1 -- the "cannot connect to BX1" error).
-        public string BX1HostIp { get; set; } = DeviceConfig.Current.Bx1.HostIp;
+        public string BX1HostIp => DeviceConfig.Current.Bx1.HostIp;
 
         // TargetIp = the Soft dPAC CONTAINER (EAE deploys here); HostIp = the RevPi Linux HOST NIC. The two
         // must differ: RevPiAddressValidator fails generation if they are equal or collide with an endpoint.
-        public string RevPiTargetIp { get; set; } = DeviceConfig.Current.RevPi.TargetIp;
-        public string RevPiHostIp { get; set; } = DeviceConfig.Current.RevPi.HostIp;
+        public string RevPiTargetIp => DeviceConfig.Current.RevPi.TargetIp;
+        public string RevPiHostIp => DeviceConfig.Current.RevPi.HostIp;
 
         // Retained because the prebuilt VueOne runner links this property; device.yml's targets entry is
         // what generation actually reads, so nothing here decides a resource name any more.
