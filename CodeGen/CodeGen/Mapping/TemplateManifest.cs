@@ -40,6 +40,12 @@ namespace CodeGen.Mapping
                   string.Join(", ", hits.Select(t => t.Name)) + ".");
         }
 
+        // THE DEPLOYED FILE FOR A ROLE. A deploy-time patch addresses a type by what it DOES - the
+        // process engine, the ring relay, the interlock evaluator - and templates.yml says which type
+        // that is. Spelling the filename at the patch instead makes the patch and the catalogue two
+        // owners of the same fact, and the one that is wrong fails silently: an absent .fbt is skipped.
+        public static string FbtOf(string role) => ForInfraRole(role).Name + ".fbt";
+
         // The namespace an instance of this type is emitted with. A type that declares none is the
         // Mapper's own, so it carries the project namespace.
         public static string NamespaceOf(TemplateType t) =>
