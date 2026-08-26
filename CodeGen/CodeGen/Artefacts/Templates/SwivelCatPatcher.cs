@@ -16,7 +16,7 @@ namespace CodeGen.Services
         // Keeps Inputs on the real sensor symlinks; hard-fails if SimCentreHomeSensor_7SCH survives.
         internal static void NormalizeSwivelSimSensorSource(FbtEditScope scope, DeployResult result)
         {
-            var fbt = FindDeployedFbt(scope.Root, "Seven_State_Actuator_Centre_Home_CAT.fbt");
+            var fbt = FindDeployedFbt(scope.Root, TemplateManifest.FbtOf("centreHomeCat"));
             if (string.IsNullOrEmpty(fbt))
             {
                 result.Warnings.Add("Seven_State_Actuator_Centre_Home_CAT.fbt not found; swivel sim-sensor normalize skipped.");
@@ -199,7 +199,7 @@ namespace CodeGen.Services
         }
 
         internal static void EnsureSensorBoolReadEvent(FbtEditScope scope, DeployResult result)
-            => EditDeployedFbt(scope, "Sensor_Bool_CAT.fbt", "Sensor_Bool_CAT RD event inject failed", result,
+            => EditDeployedFbt(scope, TemplateManifest.FbtOf("sensorCat"), "Sensor_Bool_CAT RD event inject failed", result,
                 (doc, root, ns, fbt) =>
             {
                 var ei = root.Element(ns + "InterfaceList")?.Element(ns + "EventInputs");
@@ -285,7 +285,7 @@ namespace CodeGen.Services
 
         private static void EditSwivelCore(FbtEditScope scope, string failNote, DeployResult result,
             Action<XDocument, XElement, XNamespace, string> edit)
-            => EditDeployedFbt(scope, "SevenStateCentreHomeActuator.fbt", failNote, result, edit);
+            => EditDeployedFbt(scope, TemplateManifest.FbtOf("centreHomeCore"), failNote, result, edit);
 
         // A reverse-coil brake at centre so the swivel homes directly from AtWork1 without coasting into
         // the ejector. Directional; from AtWork2 it de-energises unchanged.
@@ -298,11 +298,11 @@ namespace CodeGen.Services
                     "stops the arm at its centre reference has no duration. Declare it; there is no " +
                     "safe default for how long to hold a coil.");
 
-            var ecc = Path.Combine(scope.Root, "IEC61499", "SevenStateCentreHomeActuator.fbt");
+            var ecc = Path.Combine(scope.Root, "IEC61499", TemplateManifest.FbtOf("centreHomeCore"));
             if (!File.Exists(ecc))
             {
                 ecc = Directory.EnumerateFiles(Path.Combine(scope.Root, "IEC61499"),
-                        "SevenStateCentreHomeActuator.fbt", SearchOption.AllDirectories).FirstOrDefault() ?? string.Empty;
+                        TemplateManifest.FbtOf("centreHomeCore"), SearchOption.AllDirectories).FirstOrDefault() ?? string.Empty;
                 if (string.IsNullOrEmpty(ecc)) { result.Warnings.Add("Swivel brake: core ECC not found; skipped."); return; }
             }
             try
@@ -369,7 +369,7 @@ namespace CodeGen.Services
             }
 
             var cat = Directory.EnumerateFiles(Path.Combine(scope.Root, "IEC61499"),
-                "Seven_State_Actuator_Centre_Home_CAT.fbt", SearchOption.AllDirectories).FirstOrDefault();
+                TemplateManifest.FbtOf("centreHomeCat"), SearchOption.AllDirectories).FirstOrDefault();
             if (string.IsNullOrEmpty(cat) || !File.Exists(cat)) { result.Warnings.Add("Swivel brake: composite not found; skipped."); return; }
             try
             {
