@@ -25,11 +25,12 @@ namespace CodeGen.Configuration
         public Translation.Interlocks.InterlockConfig Interlocks { get; }  // Config/interlock.yaml
         public TemplateCatalog Templates { get; }                // Config/templates.yml
         public LayoutCatalog Layout { get; }                     // Config/layout.yml
+        public SecurityProfile Security { get; }                 // Config/security.yml
 
         private CompilerConfiguration(MapperConfig paths, DeviceConfig devices,
             GenerationConfig generation, TelemetrySettings telemetry, RigCatalog rig,
             Translation.Interlocks.InterlockConfig interlocks, TemplateCatalog templates,
-            LayoutCatalog layout)
+            LayoutCatalog layout, SecurityProfile security)
         {
             Paths = paths;
             Devices = devices;
@@ -39,6 +40,7 @@ namespace CodeGen.Configuration
             Interlocks = interlocks;
             Templates = templates;
             Layout = layout;
+            Security = security;
         }
 
         // The same declarations against a different roster. Returns a NEW snapshot rather than
@@ -48,11 +50,11 @@ namespace CodeGen.Configuration
         // a run at its staging copy; every other path the compiler resolves is derived from these.
         public CompilerConfiguration With(MapperConfig paths) =>
             new(paths ?? throw new ArgumentNullException(nameof(paths)),
-                Devices, Generation, Telemetry, Rig, Interlocks, Templates, Layout);
+                Devices, Generation, Telemetry, Rig, Interlocks, Templates, Layout, Security);
 
         public CompilerConfiguration With(LayoutCatalog layout) =>
             new(Paths, Devices, Generation, Telemetry, Rig, Interlocks, Templates,
-                layout ?? throw new ArgumentNullException(nameof(layout)));
+                layout ?? throw new ArgumentNullException(nameof(layout)), Security);
 
         // THE ONE PLACE the declaration files are read for a run. Each loader validates its own file
         // as it loads, so an invalid declaration stops the run here - before a plan exists, and so
@@ -65,6 +67,7 @@ namespace CodeGen.Configuration
                 RigCatalog.Current,
                 Translation.Interlocks.InterlockConfig.Current,
                 TemplateCatalog.Current,
-                LayoutCatalog.Load());
+                LayoutCatalog.Load(),
+                SecurityProfile.Current);
     }
 }
