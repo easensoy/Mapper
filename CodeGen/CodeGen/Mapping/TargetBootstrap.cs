@@ -18,16 +18,16 @@ namespace CodeGen.Mapping
     {
         // The declared bring-up, in declaration order - which is emission order. TargetRegistry has
         // already proved every endpoint names a role some target boots with.
-        public static IEnumerable<(string Source, string Destination)> BringUp =>
-            DeviceConfig.Current.BringUp.Select(w => (w.From, w.To));
+        public static readonly IReadOnlyList<(string Source, string Destination)> BringUp =
+            DeviceConfig.Current.BringUp.Select(w => (w.From, w.To)).ToList();
 
         // Every declared boot role. A boot FB is emitted under its role name, so this is also the set of
         // instance names a resource boots with, which is what tells a component apart from a boot FB.
-        public static IReadOnlySet<string> BootRoles =>
+        public static readonly IReadOnlySet<string> BootRoles =
             DeviceConfig.Current.BootSequence.Select(b => b.Role).ToHashSet(StringComparer.Ordinal);
 
         // The role whose INITO heads a resource's init chain: the first FB the boot sequence declares.
-        public static string InitRole =>
+        public static readonly string InitRole =
             DeviceConfig.Current.BootSequence.FirstOrDefault()?.Role
             ?? throw new InvalidOperationException(
                 "[Bootstrap] device.yml declares no bootSequence, so no resource has an FB to init from.");
