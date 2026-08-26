@@ -24,7 +24,7 @@ namespace CodeGen.Devices.RevPi
             Configuration.DeviceConfig.Identity(CodeGen.Translation.PlcAssignment.Named("RevPi"));
 
         internal static string SysdevId => RevPiId.Sysdev;
-        static readonly string DeviceName = TargetRegistry.Of(CodeGen.Translation.PlcAssignment.Named("RevPi")).DeviceName!;
+        static string DeviceName(Mapping.TargetIndex t) => t.Of(CodeGen.Translation.PlcAssignment.Named("RevPi")).DeviceName!;
         const string EquipmentJsonName = "Equipment_Revolution_Pi.json";
         // Topology uuids. NicUuid is also named in TopologyNetworkEmitter, which wires NIC_2[Port1] to the switch.
         static string EquipmentUuid => RevPiId.Equipment;
@@ -69,17 +69,17 @@ namespace CodeGen.Devices.RevPi
             var shell = new Station2DeviceEmitter.EmitResult();
             Station2DeviceEmitter.EmitOnePlc(cfg, eaeRoot!, systemGuidDir, shell,
                 sysdevId: SysdevId,
-                deviceName: DeviceName,
-                deviceType: TargetRegistry.Of(CodeGen.Translation.PlcAssignment.Named("RevPi")).DeviceType,
+                deviceName: DeviceName(ctx.Targets),
+                deviceType: ctx.Targets.Of(CodeGen.Translation.PlcAssignment.Named("RevPi")).DeviceType,
                 resourceId: coupler.ResourceId,
-                resourceName: ResourceName,
+                resourceName: ResourceName(ctx.Targets),
                 hcfTemplatePath: HcfTemplatePath(cfg),
                 equipmentJsonName: EquipmentJsonName,
                 equipmentBuilder: () => EquipmentJson(cfg, solutionId, cfg.Devices.RevPi.HostIp, cfg.Devices.RevPi.TargetIp),
                 deployPluginPropertiesXml: Station2DeviceEmitter.BuildSoftDpacDeployPluginPropertiesXml(cfg,
                     cfg.Telemetry.PublishEnabled && !cfg.Telemetry.SecureTls),
-                simulationBindingDeployPort: TargetRegistry.Of(PlcAssignment.Named("RevPi")).SimulationDeployPort,
-                simulationBindingArchivePort: TargetRegistry.Of(PlcAssignment.Named("RevPi")).SimulationArchivePort);
+                simulationBindingDeployPort: ctx.Targets.Of(PlcAssignment.Named("RevPi")).SimulationDeployPort,
+                simulationBindingArchivePort: ctx.Targets.Of(PlcAssignment.Named("RevPi")).SimulationArchivePort);
             foreach (var w in shell.Warnings) report.Missing.Add($"[RevPi] {w}");
 
             // A missing hardware config is an EAE "Missing Project Files" report; EnsureHcf re-copies it.
@@ -95,7 +95,7 @@ namespace CodeGen.Devices.RevPi
                     .Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation, ctx.Cfg) == PlcAssignment.Named("RevPi"))
                     .ToList();
                 int mirrored = SysresFbMirror.MirrorFbsIntoSysres(sysres, fbs,
-                    TargetBootstrap.For(PlcAssignment.Named("RevPi"), ctx.Layout));
+                    ctx.Targets.BootFor(PlcAssignment.Named("RevPi"), ctx.Layout), ctx.Manifest);
                 report.Missing.Add($"[RevPi] device emitted; resource mirrored {mirrored} component(s)");
                 // EAE fails to LOAD a resource whose {resId}/opcua.xml companion folder is absent, and SysresFbMirror does not create it.
                 CodeGen.Artefacts.OpcuaCompanionEmitter.EmitForArtefact(sysres);
@@ -124,7 +124,7 @@ namespace CodeGen.Devices.RevPi
 
             var hosted = HostedComponents(ctx, coupler);
             var bootFb = ctx.Layout.BootFbs.Count > 0
-                ? ctx.Layout.BootFbs[0].Name : Mapping.TargetBootstrap.InitRole;
+                ? ctx.Layout.BootFbs[0].Name : ctx.Targets.InitRole;
             int written = 0;
             foreach (var (label, path, isResource) in new[]
                      {
@@ -150,7 +150,7 @@ namespace CodeGen.Devices.RevPi
                     $"{coupler.Signals.Count} signal(s) for [{string.Join(", ", hosted)}].");
         }
 
-        static string ResourceName => TargetRegistry.Of(PlcAssignment.Named("RevPi")).ResourceName;
+        static string ResourceName(Mapping.TargetIndex t) => t.Of(PlcAssignment.Named("RevPi")).ResourceName;
 
         static string SysresPath(string systemGuidDir, string resourceId) =>
             Path.Combine(systemGuidDir, SysdevId, $"{resourceId}.sysres");
@@ -238,7 +238,7 @@ namespace CodeGen.Devices.RevPi
                     ["RuntimeTypeId"] = SoftDpacTypeId,
                     ["SysdevId"] = SysdevId,
                     ["DeviceNetwork"] = DeviceNetworkUuid,
-                    ["DeviceName"] = DeviceName,
+                    ["DeviceName"] = DeviceName(cfg.Targets),
                     ["HostInterface"] = HostInterface,
                     ["ContainerImage"] = SoftDpacImage,
                     ["ContainerImageVersion"] = SoftDpacImageVersion,
