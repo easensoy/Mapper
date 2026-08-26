@@ -89,8 +89,8 @@ namespace MapperTests
         [Fact]
         public void Every_registered_backend_inherits_the_fail_closed_stage_contract()
         {
-            Assert.NotEmpty(TargetRegistry.Backends);
-            foreach (var backend in TargetRegistry.Backends)
+            Assert.NotEmpty(TargetBackends.All);
+            foreach (var backend in TargetBackends.All)
                 Assert.IsAssignableFrom<TargetBackend>(backend);
         }
 
