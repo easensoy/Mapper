@@ -43,22 +43,22 @@
 #   crossingFaultTimeoutMs  watchdog for a crossing between two work stops, which outlasts one leg
 
 templates:
-  - { name: FiveStateActuator,            kind: basic, role: infrastructure, deploy: true, forceRefresh: true }
-  - { name: Sensor_Bool,                  kind: basic, role: infrastructure, deploy: true, forceRefresh: true }
+  - { name: FiveStateActuator,            kind: basic, role: infrastructure, deploy: true, forceRefresh: true, infraRoles: [fiveStateCore] }
+  - { name: Sensor_Bool,                  kind: basic, role: infrastructure, deploy: true, forceRefresh: true, infraRoles: [sensorCore] }
   - { name: Station_Core,                 kind: basic, role: infrastructure, deploy: true }
   - { name: Station_Fault,                kind: basic, role: infrastructure, deploy: true }
   - { name: Station_Status,               kind: basic, role: infrastructure, deploy: true }
-  - { name: ProcessRuntime_Generic_v1,    kind: basic, role: infrastructure, deploy: true, forceRefresh: true }
-  - { name: ProcessStateBusHandler,       kind: basic, role: infrastructure, deploy: true, forceRefresh: true }
+  - { name: ProcessRuntime_Generic_v1,    kind: basic, role: infrastructure, deploy: true, forceRefresh: true, infraRoles: [processEngine] }
+  - { name: ProcessStateBusHandler,       kind: basic, role: infrastructure, deploy: true, forceRefresh: true, infraRoles: [processStateBus] }
   - { name: FaultLatch,                   kind: basic, role: infrastructure, deploy: true }
   - { name: actuatorStateEvents,          kind: basic, role: infrastructure, deploy: true }
-  - { name: updateComponentState,         kind: basic, role: infrastructure, deploy: true, forceRefresh: true }
+  - { name: updateComponentState,         kind: basic, role: infrastructure, deploy: true, forceRefresh: true, infraRoles: [ringRelay] }
   - { name: updateComponentState_Sensor,  kind: basic, role: infrastructure, deploy: true }
   - { name: No_Sensor_Handler,            kind: basic, role: infrastructure, deploy: true }
-  - { name: CommonInterlockEvaluator,     kind: basic, role: infrastructure, deploy: true, forceRefresh: true }
+  - { name: CommonInterlockEvaluator,     kind: basic, role: infrastructure, deploy: true, forceRefresh: true, infraRoles: [interlockEvaluator] }
   - { name: changeEventProcess1,          kind: basic, role: infrastructure, deploy: true }
   - { name: changeEventProcess2,          kind: basic, role: infrastructure, deploy: true }
-  - { name: SevenStateCentreHomeActuator, kind: basic, role: infrastructure, deploy: true, forceRefresh: true }
+  - { name: SevenStateCentreHomeActuator, kind: basic, role: infrastructure, deploy: true, forceRefresh: true, infraRoles: [centreHomeCore] }
   - { name: No_Sensor_Handler_7SCH,       kind: basic, role: infrastructure, deploy: true, forceRefresh: true }
   - { name: FaultLatch_7SCH,              kind: basic, role: infrastructure, deploy: true }
   - { name: actuatorStateEvents_7SCH,     kind: basic, role: infrastructure, deploy: true }
@@ -103,6 +103,7 @@ templates:
   # symlinkQi: this CAT reaches its IO through SYMLINKMULTIVARDST/SRC subscribers, which EAE drops
   # unless QI is TRUE - a core islanded from its IO deploys perfectly and simply never sees a sensor.
   - name: Five_State_Actuator_CAT
+    infraRoles: [fiveStateCat]
     symlinkQi: true
     kind: cat
     role: actuator
@@ -137,6 +138,7 @@ templates:
       enforcedTargets: [work1, home]
 
   - name: Sensor_Bool_CAT
+    infraRoles: [sensorCat]
     symlinkQi: true
     kind: cat
     role: sensor
@@ -153,6 +155,7 @@ templates:
       topicNameSource: name
 
   - name: Process1_Generic
+    infraRoles: [processCat]
     kind: cat
     role: process
     deploy: true
@@ -185,6 +188,7 @@ templates:
       producersPerConsumer: 1
 
   - name: Seven_State_Actuator_Centre_Home_CAT
+    infraRoles: [centreHomeCat]
     symlinkQi: true
     kind: cat
     role: actuator
@@ -267,7 +271,7 @@ templates:
       infraRoles: [mqttConnection], namespace: Runtime.NetConnectivity }
   - { name: Telemetry,            kind: composite, role: infrastructure, mirrorToSysres: true,
       infraRoles: [mqttConnectionWrapped] }
-  - { name: MqttStateFormatter,   kind: basic,     role: infrastructure, mirrorToSysres: true }
+  - { name: MqttStateFormatter,   kind: basic,     role: infrastructure, mirrorToSysres: true, infraRoles: [mqttFormatter] }
   - { name: MQTT_PUBLISH_115480E69E664F878, kind: basic, role: infrastructure, mirrorToSysres: true }
 
   - { name: Component_State,     kind: dataType, role: infrastructure, deploy: true }
