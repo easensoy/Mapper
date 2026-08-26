@@ -36,11 +36,11 @@ namespace CodeGen.Artefacts
                 throw new FileNotFoundException(
                     $"Demonstrator syslay not configured or missing: '{config.Paths.SyslayPath2}'");
 
-            CleanFile(config.Paths.SyslayPath2, "SubAppNetwork", report);
+            CleanFile(config.Paths.SyslayPath2, "SubAppNetwork", report, config.Manifest);
 
             // EAE renames the .sysres to the short-hex resource ID, so resolve the actual file by globbing the sysdev folder.
             foreach (var sysresPath in ResolveActualSysresPaths(config))
-                CleanFile(sysresPath, "FBNetwork", report);
+                CleanFile(sysresPath, "FBNetwork", report, config.Manifest);
 
             CleanM262SysdevResources(config, report);
 
@@ -150,7 +150,7 @@ namespace CodeGen.Artefacts
                     if (root == null) continue;
                     var type  = (string?)root.Attribute("Type")      ?? string.Empty;
                     var nspac = (string?)root.Attribute("Namespace") ?? string.Empty;
-                    if (string.Equals(type, TargetRegistry.Of(TargetRegistry.FeedTarget).DeviceType,
+                    if (string.Equals(type, config.Targets.Of(config.Targets.FeedTarget).DeviceType,
                             StringComparison.Ordinal) &&
                         string.Equals(nspac, TargetDescriptor.DeviceNamespace, StringComparison.Ordinal))
                     {
@@ -264,7 +264,8 @@ namespace CodeGen.Artefacts
             Log($"kept resource {firstResourceId}");
         }
 
-        private static void CleanFile(string path, string netTag, CleanupReport report)
+        private static void CleanFile(string path, string netTag, CleanupReport report,
+            Mapping.TemplateIndex manifest)
         {
             report.DeviceCleanupLog.Add($"[Clean] file={path} root=<{netTag}>");
 
@@ -287,7 +288,7 @@ namespace CodeGen.Artefacts
                 var fbNs = fb.Attribute("Namespace")?.Value ?? string.Empty;
 
                 // Swept because this run re-emits it; anything else on the canvas is left alone.
-                bool isUniversal = TemplateManifest.EmittedTypes.Contains(fbType) ||
+                bool isUniversal = manifest.EmittedTypes.Contains(fbType) ||
                     (fbType == "plcStart" && fbNs == "SE.AppBase");
 
                 if (isUniversal)
