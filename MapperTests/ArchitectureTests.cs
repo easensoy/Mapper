@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -189,6 +189,73 @@ namespace MapperTests
             Unique("IO broker", t => t.IoBroker);
             Unique("deploy service port", t => t.SimulationDeployPort.ToString());
             Unique("archive service port", t => t.SimulationArchivePort.ToString());
+        }
+
+        // ------------------------------------------------------------------------------------
+        // A regex escape that did not survive the tool that wrote it.
+        // ------------------------------------------------------------------------------------
+        [Fact]
+        public void No_source_file_contains_a_literal_backspace()
+        {
+            // Twice now, a word-boundary escape has been written into this repository as the single
+            // character U+0008. It compiles, it runs, and it matches nothing - so the scan that was
+            // supposed to enforce a rule silently enforces nothing and reports PASS. A test that can
+            // pass vacuously is worse than no test, so the character itself is banned.
+            var breaches = new List<string>();
+            foreach (var f in Production().Concat(TestSources()))
+                if (File.ReadAllText(f).Contains((char)8))
+                    breaches.Add(Rel(f));
+            NoBreaches(breaches,
+                "a source file contains a literal backspace, which is almost always a word-boundary " +
+                "escape that was eaten by the tool that wrote it - the regex then matches nothing");
+        }
+
+        static IEnumerable<string> TestSources() =>
+            Directory.EnumerateFiles(Path.Combine(Root(), "MapperTests"), "*.cs", SearchOption.AllDirectories)
+                .Concat(Directory.EnumerateFiles(Path.Combine(Root(), "Gate"), "*.cs", SearchOption.AllDirectories))
+                .Where(f => !f.Replace(Path.DirectorySeparatorChar, '/').Contains("/obj/")
+                         && !f.Replace(Path.DirectorySeparatorChar, '/').Contains("/bin/"));
+
+        // ------------------------------------------------------------------------------------
+        // No mutable global carries state INTO a generation.
+        // ------------------------------------------------------------------------------------
+        [Fact]
+        public void No_mutable_static_carries_configuration_or_backends_between_runs()
+        {
+            // A settable static holding a declaration, a plan or a backend is state one run can leave
+            // behind for the next, and state two concurrent runs share. Both are invisible until two
+            // profiles are compiled at once and one of them silently gets the other's targets.
+            var carriers = new[]
+            {
+                "CompilerConfiguration", "DeviceConfig", "GenerationConfig", "TelemetrySettings",
+                "RigCatalog", "InterlockConfig", "TemplateCatalog", "LayoutCatalog", "SecurityProfile",
+                "ITargetBackend", "GenerationContext", "DeploymentProfile", "CompilerSession",
+            };
+
+            var breaches = new List<string>();
+            foreach (var f in Production())
+            {
+                foreach (var line in CodeOf(f).Split('|'))
+                {
+                    var t = line.Trim();
+                    if (!t.StartsWith("static", StringComparison.Ordinal) &&
+                        !t.Contains(" static ", StringComparison.Ordinal)) continue;
+                    if (t.Contains("readonly", StringComparison.Ordinal)) continue;   // frozen on first use
+                    if (t.Contains("const ", StringComparison.Ordinal)) continue;
+                    // A settable static PROPERTY or a plain static FIELD of a carrier type.
+                    var settable = t.Contains("set;", StringComparison.Ordinal) ||
+                                   (t.EndsWith(";", StringComparison.Ordinal) &&
+                                    !t.Contains("=>", StringComparison.Ordinal) &&
+                                    !t.Contains("(", StringComparison.Ordinal));
+                    if (!settable) continue;
+                    foreach (var c in carriers)
+                        if (Regex.IsMatch(t, "(?<![A-Za-z0-9_])" + Regex.Escape(c) + "(?![A-Za-z0-9_])"))
+                            breaches.Add($"{Rel(f)} -> {t}");
+                }
+            }
+            NoBreaches(breaches,
+                "a mutable static carries a declaration, a plan or a backend, so one run can leave state " +
+                "behind for the next and two concurrent runs share it");
         }
 
         // ------------------------------------------------------------------------------------
