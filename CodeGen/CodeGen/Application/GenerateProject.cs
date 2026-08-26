@@ -36,26 +36,90 @@ namespace CodeGen.Application
     // The one generation path from Control.xml to EAE artefacts. Synchronous: `log` runs on the caller's thread.
     public static class GenerateProject
     {
+        // THE COMPOSITION ROOT for target backends: the one place in the generator that names a
+        // concrete device family. Everything else asks TargetRegistry for the SET, so no planner,
+        // emitter or validator has to know which controllers exist.
+        //
+        // A KIND is implemented once here. WHICH targets exist, which kind emits each, and the order a
+        // run drives them are all declared in device.yml - so a second controller of a kind that
+        // already has a backend is a row in that file and no change here at all. Genuinely new
+        // hardware earns one entry.
+        private static readonly IReadOnlyDictionary<string, Func<PlcAssignment, CodeGen.Devices.ITargetBackend>>
+            BackendKinds = new Dictionary<string, Func<PlcAssignment, CodeGen.Devices.ITargetBackend>>(
+                StringComparer.OrdinalIgnoreCase)
+            {
+                ["M262"] = t => new CodeGen.Devices.M262.M262Backend(t),
+                ["M580"] = t => new CodeGen.Devices.M580.M580Backend(t),
+                ["BX1"] = t => new CodeGen.Devices.BX1.Bx1Backend(t),
+                ["RevPi"] = t => new CodeGen.Devices.RevPi.RevPiBackend(t),
+            };
+
+        // One backend per DECLARED target, in the declared drive order. A kind nothing implements and a
+        // drive order that does not name every target both stop the run here, before anything is
+        // planned - a target silently left undriven emits no device and the run still reports success.
+        public static CodeGen.Devices.ITargetBackend[] Backends()
+        {
+            var declared = Configuration.DeviceConfig.Current;
+            var byPlc = declared.Targets.ToDictionary(t => t.Plc);
+            var order = declared.BackendEmitOrder;
+
+            var errors = new List<string>();
+            foreach (var t in declared.Targets)
+                if (!BackendKinds.ContainsKey(t.BackendKind ?? string.Empty))
+                    errors.Add($"target '{t.Plc}' declares backendKind '{t.BackendKind}', which no backend " +
+                               $"implements. Implemented kinds: {string.Join(", ", BackendKinds.Keys)}");
+            foreach (var plc in order)
+                if (!byPlc.ContainsKey(plc))
+                    errors.Add($"backendEmitOrder names '{plc}', which device.yml declares no target for");
+            foreach (var t in declared.Targets)
+                if (!order.Contains(t.Plc))
+                    errors.Add($"backendEmitOrder omits target '{t.Plc}', so nothing would emit its device");
+            if (order.Count != order.Distinct().Count())
+                errors.Add("backendEmitOrder names a target twice, so its device would be emitted twice");
+            if (errors.Count > 0)
+                throw new InvalidOperationException(
+                    "device.yml backend declarations are inconsistent:" + Environment.NewLine +
+                    "  - " + string.Join(Environment.NewLine + "  - ", errors));
+
+            return order.Select(plc => BackendKinds[byPlc[plc].BackendKind](plc)).ToArray();
+        }
+
         public static GenerationResult Execute(GenerationRequest request, Action<string> log)
         {
             if (request is null) throw new ArgumentNullException(nameof(request));
             if (log is null) throw new ArgumentNullException(nameof(log));
 
-            // Work on a copy: MapperUI keeps one config for the process lifetime, so mutation leaks between runs.
-            var cfg = request.Config.Clone();
+            TargetRegistry.UseBackends(Backends());
 
-            // The RevPi coupler carries IO for only part of the Feed station, so it coexists with M262.
-            var profile = new DeploymentProfile(request.RevPiComponents, LayoutCatalog.Load());
+            // Work on a copy: MapperUI keeps one config for the process lifetime, so mutation leaks between runs.
+            // THE CONFIGURATION COMPOSITION ROOT. Every declaration file is read ONCE, here, and one
+            // snapshot travels through planning, validation and rendering. No stage below re-reads a
+            // declaration, so a file saved while a run is in flight cannot make two stages of that run
+            // compile against different configurations.
+            var cfg = Configuration.CompilerConfiguration.Load(request.Config.Clone());
+
+            // THE BOUNDARY. The request carries the selection the UI and the VueOne runner have always
+            // sent - a set of component names bound for the relocation target. It becomes a generic
+            // component -> target assignment here, and nothing below this line names a controller.
+            var profile = DeploymentProfile.Relocating(request.RevPiComponents, cfg);
 
             // Plan before the first artefact is written, so an inexpressible model fails with a diagnostic.
             var ctx = GenerationContext.Plan(cfg, request.ControlXmlPath, profile);
 
-            // Judged against the twin: only a component that needs a physical channel needs the coupler
-            // to carry one. Still before anything is written - planning touches no file.
-            RevPiSelectionValidator.ThrowIfInvalid(profile, ctx.IoBearing(profile.RevPiComponents));
+            // Whether a target can actually serve what this run assigned to it is that TARGET's answer:
+            // its own hardware decides. Still before anything is written - planning touches no file.
+            foreach (var backend in TargetRegistry.Backends) backend.ValidateAssignment(ctx);
+
+            // A dropped message and a connection nothing opens both look exactly like success, so the
+            // telemetry declaration is proved against the planned resources here rather than on the rig.
+            TelemetryPlanValidator.Validate(ctx);
+
+            // And the template cfg are proved against the archives that ship the types. Still
+            // before anything is written: a drifted declaration must not cost the previous project.
+            PortNameValidator.AssertContractMatchesArchives(cfg.Paths.TemplateLibraryPath);
 
             DeepClean(cfg, log);
-            LogM262SysdevState(cfg, log);
+            LogFeedSysdevState(cfg, log);
 
             var injector = new SystemInjector();
             foreach (var finding in ctx.SemanticFindings) log($"[Semantics] {finding}");
@@ -70,7 +134,9 @@ namespace CodeGen.Application
 
             FinalizeDeviceStack(ctx, log);
             WireResources(ctx, report, log);
-            InjectBx1Broker(ctx, path, report, log);
+            // Anything a target must do to the canvas once every resource is wired.
+            foreach (var backend in TargetRegistry.Backends)
+                backend.FinishApplication(ctx, path, report, log);
             BindHardware(ctx, bindings, report, log);
 
             ValidateHcfReferences(cfg, log);
@@ -80,7 +146,7 @@ namespace CodeGen.Application
             ValidateConnections(cfg, log);
             ValidateAddresses(ctx, log);
             ValidateMqtt(cfg, log);
-            ValidateBx1Scanner(cfg, log);
+            foreach (var backend in TargetRegistry.Backends) backend.ValidateOutput(ctx, log);
 
             TouchDfbproj(cfg, log);
             log($"Generated: {path}");
@@ -88,7 +154,7 @@ namespace CodeGen.Application
         }
 
         // The root is DERIVED from the configured project, so a retargeted output root cleans itself.
-        static void DeepClean(MapperConfig cfg, Action<string> log)
+        static void DeepClean(Configuration.CompilerConfiguration cfg, Action<string> log)
         {
             var eae = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             var demoRepo = string.IsNullOrEmpty(eae) ? @"C:\Demonstrator" : Path.GetDirectoryName(eae);
@@ -140,7 +206,7 @@ namespace CodeGen.Application
         }
 
         // An existing .sysdev is preserved to keep its trust binding, an absent one is bootstrapped.
-        static void LogM262SysdevState(MapperConfig cfg, Action<string> log)
+        static void LogFeedSysdevState(Configuration.CompilerConfiguration cfg, Action<string> log)
         {
             var exists = false;
             try { exists = M262SysdevEmitter.M262SysdevAlreadyExists(cfg); } catch { }
@@ -169,11 +235,11 @@ namespace CodeGen.Application
         }
 
         // A missing workbook leaves every actuator channel unbound, so self-heal or fail loudly.
-        static IoBindings? LoadBindings(MapperConfig cfg, Action<string> log)
+        static IoBindings? LoadBindings(Configuration.CompilerConfiguration cfg, Action<string> log)
         {
             try
             {
-                var path = ResolveBindingsPath(cfg.IoBindingsPath);
+                var path = ResolveBindingsPath(cfg.Paths.IoBindingsPath);
                 if (!File.Exists(path))
                 {
                     var fileName = Path.GetFileName(path);
@@ -262,7 +328,7 @@ namespace CodeGen.Application
         // .sysres empty and every FB unmapped on the EAE canvas.
         static void FinalizeDeviceStack(GenerationContext ctx, Action<string> log)
         {
-            var cfg = ctx.Config;
+            var cfg = ctx.Cfg;
 
             // Every registered backend, in registration order: a device whose System folder another one
             // creates has to come after it, and that order is declared there rather than written here.
@@ -284,7 +350,7 @@ namespace CodeGen.Application
             // A sysdev missing from Folders.xml is silently dropped from EAE's Solution Explorer and Deploy.
             try
             {
-                var fx = FoldersXmlEmitter.Register(cfg, partialRevPi: ctx.Profile.PartialRevPi);
+                var fx = FoldersXmlEmitter.Register(cfg, partialRevPi: ctx.Profile.HasAssignments);
                 if (fx.ItemsAdded > 0) log($"[Topology] Folders.xml: registered {fx.ItemsAdded} sysdev GUID(s)");
                 if (fx.ItemsRemoved > 0) log($"[Topology] Folders.xml: removed {fx.ItemsRemoved} sysdev GUID(s) this run does not emit");
                 foreach (var w in fx.Warnings) log($"[Topology][Warn] Folders.xml: {w}");
@@ -337,7 +403,7 @@ namespace CodeGen.Application
             try
             {
                 var s2 = Station2SysresMirror.EmitStation2Sysres(ctx);
-                log($"[Stn2] mirrored FBs → M580:{s2.M580} BX1:{s2.BX1}");
+                log("[Stn2] mirrored FBs → " + string.Join(" ", s2.Select(r => $"{r.Plc}:{r.Count}")));
             }
             catch (Exception ex) { log($"[Stn2][Error] sysres mirror: {ex.Message}"); }
 
@@ -376,30 +442,16 @@ namespace CodeGen.Application
         static void WireResources(GenerationContext ctx,
             SystemInjector.BindingApplicationReport report, Action<string> log)
         {
-            try
-            {
-                var mirrored = Station2SysresMirror.EmitStation2Sysres(ctx);
-                log($"[Stn2] re-mirrored FBs -> M580:{mirrored.M580} BX1:{mirrored.BX1} " +
-                    "(CAT types synced to syslay)");
-            }
-            catch (Exception ex) { log($"[Stn2][Error] sysres mirror: {ex.Message}"); }
+            // The wiring about to run connects the FBs this creates, so a failure here leaves every
+            // resource half-built - and a half-built resource still deploys. It ABORTS.
+            var mirrored = Station2SysresMirror.EmitStation2Sysres(ctx);
+            log("[Resource] re-mirrored FBs -> " +
+                string.Join(" ", mirrored.Select(r => $"{r.Plc}:{r.Count}")) +
+                " (CAT types synced to the canvas)");
 
             var before = report.Missing.Count;
             foreach (var backend in TargetRegistry.Backends) backend.WireResource(ctx, report, log);
             LogNew(report, before, _ => true, log);
-        }
-
-        // Runs after the Station-2 mirror/wire so the cover FBs the broker's symlinks resolve to exist.
-        static void InjectBx1Broker(GenerationContext ctx, string syslayPath,
-            SystemInjector.BindingApplicationReport report, Action<string> log)
-        {
-            try
-            {
-                var n = Bx1IoBrokerInjector.InjectBx1IoBroker(ctx.Config, syslayPath, report);
-                log($"[BX1][Broker] BX1_IO injected into {n} artefact(s).");
-                ResourceWireEmitter.ApplyLayoutToSyslay(ctx, syslayPath, report);
-            }
-            catch (Exception ex) { log($"[BX1][Broker][Error] {ex.Message}"); }
         }
 
         // Physical channels bound to the FBs each target hosts.
@@ -413,7 +465,7 @@ namespace CodeGen.Application
         }
 
         // Every DI/DO binding must resolve to an FB and pin on the SAME resource's sysres.
-        static void ValidateHcfReferences(MapperConfig cfg, Action<string> log)
+        static void ValidateHcfReferences(Configuration.CompilerConfiguration cfg, Action<string> log)
         {
             // FATAL: the project still imports, deploys and reports success while the channel is dead.
             List<HcfReferenceValidator.Violation> violations;
@@ -439,7 +491,7 @@ namespace CodeGen.Application
 
         // Both failures are silent in EAE: an unresolvable wire is dropped and a double-driven input resolves
         // by evaluation order, so they surface here or not at all.
-        static void ValidateConnections(MapperConfig cfg, Action<string> log)
+        static void ValidateConnections(Configuration.CompilerConfiguration cfg, Action<string> log)
         {
             var violations = ConnectionIntegrityValidator.Validate(EaeProjectLayout.DeriveEaeProjectRoot(cfg));
             if (violations.Count == 0)
@@ -453,7 +505,7 @@ namespace CodeGen.Application
                 "the first is: " + violations[0]);
         }
 
-        static void SyncSysresParameters(MapperConfig cfg, string path, Action<string> log)
+        static void SyncSysresParameters(Configuration.CompilerConfiguration cfg, string path, Action<string> log)
         {
             try
             {
@@ -465,7 +517,7 @@ namespace CodeGen.Application
 
         // .hcf-id realignment can leave an empty sysres under the old id; runs LATE so each device folder
         // ends with exactly its live resource.
-        static void SweepOrphans(MapperConfig cfg, Action<string> log)
+        static void SweepOrphans(Configuration.CompilerConfiguration cfg, Action<string> log)
         {
             try
             {
@@ -508,7 +560,7 @@ namespace CodeGen.Application
         // logic silently. A FAIL usually means EAE held a sysres locked during the sync.
         static void ValidateParity(GenerationContext ctx, string path, Action<string> log)
         {
-            var cfg = ctx.Config;
+            var cfg = ctx.Cfg;
             try
             {
                 var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
@@ -549,7 +601,7 @@ namespace CodeGen.Application
         // check can catch it. A duplicated container address is fatal; duplicated host NICs are tolerated.
         static void ValidateAddresses(GenerationContext ctx, Action<string> log)
         {
-            var cfg = ctx.Config;
+            var cfg = ctx.Cfg;
             try
             {
                 var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
@@ -571,12 +623,12 @@ namespace CodeGen.Application
             }
         }
 
-        static void ValidateMqtt(MapperConfig cfg, Action<string> log)
+        static void ValidateMqtt(Configuration.CompilerConfiguration cfg, Action<string> log)
         {
             try
             {
                 var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
-                var (rows, findings) = MqttConnectionValidator.Inspect(eaeRoot);
+                var (rows, findings) = MqttConnectionValidator.Inspect(cfg, eaeRoot);
                 foreach (var r in rows)
                     log($"[MQTT] {r.Resource}.{r.Fb}: URL={r.Url} ConnectionID={r.ConnectionID} " +
                         $"ClientIdentifier={r.ClientIdentifier} ValidateCert={r.ValidateCert}");
@@ -587,31 +639,11 @@ namespace CodeGen.Application
             catch (Exception ex) { log($"[MQTT][Error] {ex.Message}"); }
         }
 
-        // The cover safe-start reaches the coupler only if the scanner carries the coupler device.
-        static void ValidateBx1Scanner(MapperConfig cfg, Action<string> log)
-        {
-            bool fatal = false;
-            try
-            {
-                var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
-                if (string.IsNullOrEmpty(eaeRoot)) return;
-                var scan = Bx1ScannerValidator.Validate(eaeRoot);
-                foreach (var l in scan.Lines) log(l);
-                fatal = scan.Fatal;
-            }
-            catch (Exception ex) { log($"[BX1][Scanner][Error] {ex.Message}"); }
-            // Thrown outside the catch so it is not swallowed: an empty scanner deploys but cannot move a cover.
-            if (fatal)
-                throw new InvalidOperationException(
-                    "[BX1][Scanner] the BX1 EtherNet/IP scanner would compile EMPTY; the cover I/O and the " +
-                    "CoverPNP_Hr safe-start cannot reach the coupler.");
-        }
-
-        static void TouchDfbproj(MapperConfig cfg, Action<string> log)
+        static void TouchDfbproj(Configuration.CompilerConfiguration cfg, Action<string> log)
         {
             try
             {
-                var dfbproj = FindDfbproj(cfg.SyslayPath2);
+                var dfbproj = EaeProjectLayout.FindDfbproj(EaeProjectLayout.DeriveEaeProjectRoot(cfg) ?? string.Empty);
                 if (dfbproj != null && File.Exists(dfbproj))
                 {
                     File.SetLastWriteTime(dfbproj, DateTime.Now);
@@ -625,16 +657,5 @@ namespace CodeGen.Application
             catch (Exception ex) { log($"[EAE] Failed to touch .dfbproj: {ex.Message}"); }
         }
 
-        static string? FindDfbproj(string startPath)
-        {
-            var dir = Directory.Exists(startPath) ? startPath : Path.GetDirectoryName(startPath);
-            while (dir != null)
-            {
-                var file = Directory.GetFiles(dir, "*.dfbproj", SearchOption.TopDirectoryOnly).FirstOrDefault();
-                if (file != null) return file;
-                dir = Directory.GetParent(dir)?.FullName;
-            }
-            return null;
-        }
     }
 }
