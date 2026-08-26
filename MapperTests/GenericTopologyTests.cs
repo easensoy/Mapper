@@ -97,7 +97,7 @@ namespace MapperTests
         {
             var twin = TwinModel.Build(components);
             return ReportGraph.Build(twin, Allocation(twin),
-                RigCatalog.Current.CrossRingSegment, Array.Empty<string>(), Graphs(twin));
+                RigCatalog.Current.CrossRingSegment, Array.Empty<string>(), Graphs(twin), TestConfig.Cfg.Targets);
         }
 
         // Roster rows on two targets that each run a process. Which target is which is not the point.
@@ -138,9 +138,9 @@ namespace MapperTests
         {
             // Running no process of its own is not what makes a target reachable from another: a target
             // says so, and one that does not is not silently spliced onto a commanding ring.
-            var carriers = TargetRegistry.All.Where(t => t.CarriesDetouredChain).Select(t => t.Plc).ToList();
+            var carriers = TestConfig.Cfg.Targets.All.Where(t => t.CarriesDetouredChain).Select(t => t.Plc).ToList();
             Assert.NotEmpty(carriers);
-            foreach (var t in TargetRegistry.All.Where(t => t.ReceivesRelocatedComponents))
+            foreach (var t in TestConfig.Cfg.Targets.All.Where(t => t.ReceivesRelocatedComponents))
                 Assert.DoesNotContain(t.Plc, carriers);
         }
 
@@ -149,13 +149,13 @@ namespace MapperTests
         {
             // The receiving target is a declared capability, and it is NOT the one hosting the station:
             // that is what makes "moved here" different from "lives here".
-            var receivers = TargetRegistry.All.Where(t => t.ReceivesRelocatedComponents).ToList();
+            var receivers = TestConfig.Cfg.Targets.All.Where(t => t.ReceivesRelocatedComponents).ToList();
             Assert.NotEmpty(receivers);
             foreach (var r in receivers)
             {
                 Assert.True(r.HostsFeedStation,
                     "a target that receives relocated components hosts the station they came from");
-                Assert.NotEqual(r.Plc, TargetRegistry.FeedTarget);
+                Assert.NotEqual(r.Plc, TestConfig.Cfg.Targets.FeedTarget);
             }
         }
 
@@ -164,8 +164,8 @@ namespace MapperTests
         {
             // The registry is the only enumeration of targets, and every capability is answerable for
             // each: nothing downstream needs to know which controller it is looking at.
-            Assert.NotEmpty(TargetRegistry.All);
-            foreach (var t in TargetRegistry.All)
+            Assert.NotEmpty(TestConfig.Cfg.Targets.All);
+            foreach (var t in TestConfig.Cfg.Targets.All)
             {
                 Assert.False(string.IsNullOrWhiteSpace(t.ResourceName));
                 Assert.False(string.IsNullOrWhiteSpace(t.DeviceType));
@@ -173,10 +173,10 @@ namespace MapperTests
             }
             // Exactly one target hosts the station without receiving relocated components, or nothing
             // could say which ring a feed-side component reports on.
-            Assert.Single(TargetRegistry.All,
+            Assert.Single(TestConfig.Cfg.Targets.All,
                 t => t.HostsFeedStation && !t.ReceivesRelocatedComponents);
             // At most one hands the detour out, or a chain would be commanded from two rings.
-            Assert.True(TargetRegistry.All.Count(t => t.OpensCoverSeam) <= 1);
+            Assert.True(TestConfig.Cfg.Targets.All.Count(t => t.OpensCoverSeam) <= 1);
         }
     }
 }
