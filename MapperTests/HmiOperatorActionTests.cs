@@ -208,7 +208,7 @@ namespace MapperTests
             var monitoring = Sym("Process1_Generic", "sAutomatic");
 
             Assert.False(monitoring.CanRaiseAnything);
-            Assert.Empty(Def().Actions.Where(monitoring.Presents));
+            Assert.DoesNotContain(Def().Actions, monitoring.Presents);
         }
 
         // The reference ships its plant RESET hidden and never restores it. Reporting that as an
