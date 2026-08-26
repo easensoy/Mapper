@@ -23,8 +23,12 @@ namespace CodeGen.Translation
             public List<(string Pin, string Value)> HcfPinAssignments { get; } = new();
         }
 
-        // The row a connection drawn at the head of its band sits on: above every station, clear of them.
-        private const int MqttConnectionRowY = 200;
+        static int Next(Dictionary<PlcAssignment, int> counts, PlcAssignment plc)
+        {
+            counts.TryGetValue(plc, out int n);
+            counts[plc] = n + 1;
+            return n;
+        }
 
 
         private static string DescribeBinding(ActuatorBinding b) =>
@@ -42,7 +46,7 @@ namespace CodeGen.Translation
             report = new BindingApplicationReport();
             if (ctx == null) throw new ArgumentNullException(nameof(ctx));
 
-            var config = ctx.Config;
+            var config = ctx.Cfg;
             var handoffPlan = ctx.Handoffs;
 
             var contents = ctx.Station;
@@ -91,7 +95,7 @@ namespace CodeGen.Translation
                         ctx, proc, instance, ctx.Slots[proc.Name], withRecipe: true);
                     var at = ctx.Roster.Get(proc.Name);
                     builder.AddFB(FBIdGenerator.GenerateFBId(proc.ComponentID), instance,
-                        TemplateManifest.ProcessType.Name, "Main", at?.X ?? 0, at?.Y ?? 0, outer);
+                        TemplateManifest.ProcessType.Name, Configuration.GenerationConfig.Namespace, at?.X ?? 0, at?.Y ?? 0, outer);
                     placed.Add(instance);
                     if (recipe == null) continue;
                     phaseNames[instance] = recipe.ProcessPhaseNames;
@@ -119,14 +123,9 @@ namespace CodeGen.Translation
             var plcIndex = config != null
                 ? HcfSymbolIndex.Build(config)
                 : new HcfSymbolIndex();
-            var perPlcCount = new Dictionary<PlcAssignment, int>
-            {
-                [PlcAssignment.M262] = 0,
-                [PlcAssignment.RevPi] = 0,   // RevPi hosts the Feed station in M262's stead
-                [PlcAssignment.M580] = 0,
-                [PlcAssignment.BX1]  = 0,
-                [PlcAssignment.Unknown] = 0,
-            };
+            // Column index per target, counted as components are met: a target's first component takes
+            // column 0 whatever the target is, so no target has to be listed here to be counted.
+            var perPlcCount = new Dictionary<PlcAssignment, int>();
 
             for (int i = 0; i < contents.Actuators.Count; i++)
             {
@@ -152,11 +151,11 @@ namespace CodeGen.Translation
                 else if (bindings != null) report.Missing.Add(actuator.Name);
 
                 // Placeholder position; CanonicalLayout overrides known names post-syslay.
-                int colInPlc = perPlcCount[actPlc]++;
+                int colInPlc = Next(perPlcCount, actPlc);
                 var (zoneX, zoneY) = PlcZonePosition(ctx.Layout, actPlc, colInPlc, LayoutRow.Actuator);
 
                 builder.AddFB(FBIdGenerator.GenerateFBId(actuator.ComponentID),
-                    displayName, fbType, "Main",
+                    displayName, fbType, Configuration.GenerationConfig.Namespace,
                     zoneX, zoneY, actParams);
 
                 if (!string.Equals(displayName, actuator.Name, StringComparison.Ordinal))
@@ -165,14 +164,7 @@ namespace CodeGen.Translation
                         "(rename from Instance_Name_Overrides xlsx sheet)");
             }
 
-            var perPlcSensorCount = new Dictionary<PlcAssignment, int>
-            {
-                [PlcAssignment.M262] = 0,
-                [PlcAssignment.RevPi] = 0,
-                [PlcAssignment.M580] = 0,
-                [PlcAssignment.BX1]  = 0,
-                [PlcAssignment.Unknown] = 0,
-            };
+            var perPlcSensorCount = new Dictionary<PlcAssignment, int>();
 
             for (int i = 0; i < contents.Sensors.Count; i++)
             {
@@ -185,13 +177,13 @@ namespace CodeGen.Translation
                 else if (bindings != null) report.Missing.Add(sensor.Name);
 
                 var senPlc = plcIndex.ResolveComponent(sensor.Name, bindings, ctx.Allocation);
-                int senCol = perPlcSensorCount[senPlc]++;
+                int senCol = Next(perPlcSensorCount, senPlc);
                 var (sX, sY) = PlcZonePosition(ctx.Layout, senPlc, senCol, LayoutRow.Sensor);
 
                 var senDisplayName = ctx.InstanceName(sensor.Name);
 
                 builder.AddFB(FBIdGenerator.GenerateFBId(sensor.ComponentID),
-                    senDisplayName, "Sensor_Bool_CAT", "Main",
+                    senDisplayName, TemplateManifest.SensorType.Name, Configuration.GenerationConfig.Namespace,
                     sX, sY,
                     new Dictionary<string, string>
                     {
@@ -200,22 +192,23 @@ namespace CodeGen.Translation
                     });
             }
 
-            // Synthesized M262 sensors: EXPLICIT ids so they never shift Feed actuator ids; off every report ring, so the Feed ring stays byte-identical.
-            // Only when the twin actually declares the cross-controller tail the synth sensor rides.
-            if (ctx.CrossRingSegment.Count > 0)
+            // Reporters this deployment injects: EXPLICIT ids so they never shift actuator ids, and off
+            // every report ring, so the ring stays byte-identical. Whether one exists at all is the
+            // plan's answer, asked once, so this emitter and the wiring plan cannot disagree.
+            if (ctx.InjectedReporters.Count > 0)
             {
-                int synthY = 5200;
+                var grid = ctx.Layout.Geometry.InjectedReporters;
+                int synthY = grid.Y;
                 string prevSynthInit = contents.Sensors
                     .Select(s => (s.Name ?? string.Empty).Trim())
-                    .First(n => ctx.Allocation.IsFeedSide(n));
+                    .First(n => TargetRegistry.Of(ctx.Allocation.Of(n)).HostsFeedStation);
                 foreach (var (synthName, synthId) in MapperConfig.M262SynthSensors)
                 {
-                    // The twin owns it if it declares it; synthesizing a second FB of the same name
-                    // would put two components on one ring slot.
-                    if (contents.Sensors.Any(s => string.Equals(s.Name, synthName, StringComparison.OrdinalIgnoreCase)))
+                    if (!ctx.InjectedReporters.Contains(synthName, StringComparer.OrdinalIgnoreCase))
                         continue;
                     builder.AddFB(FBIdGenerator.GenerateFBId("m262rigsensor-" + synthName),
-                        synthName, "Sensor_Bool_CAT", "Main", 2000, synthY,
+                        synthName, TemplateManifest.SensorType.Name,
+                        Configuration.GenerationConfig.Namespace, grid.X, synthY,
                         new Dictionary<string, string>
                         {
                             ["name"] = Iec61499Literal.FormatString(synthName),
@@ -223,7 +216,7 @@ namespace CodeGen.Translation
                         });
                     builder.AddEventConnection($"{prevSynthInit}.INITO", $"{synthName}.INIT");
                     prevSynthInit = synthName;
-                    synthY += 500;
+                    synthY += grid.RowPitch;
                 }
             }
 
@@ -232,26 +225,27 @@ namespace CodeGen.Translation
             EmitInfrastructure(builder, ctx, role => role == "areaTerminator");
 
             // Embedded MQTT_PUBLISH binds to a connection by matching ConnectionID value (no wire); gated so output is unchanged when off.
-            if (config != null && config.MqttPublishEnabled)
+            if (config != null && config.Paths.MqttPublishEnabled)
             {
-                string brokerUrl = config.MqttBrokerUrl;
+                string brokerUrl = config.Paths.MqttBrokerUrl;
                 // Scheme follows MqttSecureTls so it can't contradict the mode: insecure→mqtt:// (needs BX1 "Insecure Application", else RC101); secure→mqtts:// (needs a TLS broker, else RC100).
-                string mqttScheme = config.MqttSecureTls ? "mqtts" : "mqtt";
+                string mqttScheme = config.Paths.MqttSecureTls ? "mqtts" : "mqtt";
                 brokerUrl = System.Text.RegularExpressions.Regex.Replace(
                     brokerUrl, @"^[A-Za-z][A-Za-z0-9+.\-]*://", mqttScheme + "://");
 
                 // One MQTT_CONNECTION per PLC: UNIQUE ClientIdentifier (mosquitto evicts duplicate ids), shared ConnectionID so each resource's embedded MqttPub binds locally.
                 void InjectMqttConn(string fbName, string connectionId, string clientIdentifier, int x, int y)
                 {
-                    if (config.UseTelemetryCat)
+                    if (config.Paths.UseTelemetryCat)
                     {
                         // Telemetry composite wraps the MQTT_CONNECTION with the same ConnectionID, so the embedded MqttPub still binds.
                         var cfgLit = Iec61499Literal.FormatTelemetryConfig(
                             true, connectionId, brokerUrl, clientIdentifier,
-                            config.MqttSecureTls ? config.MqttValidateCert : 0,
-                            config.MqttSecureTls ? (config.MqttCaCert ?? string.Empty) : string.Empty);
+                            config.Paths.MqttSecureTls ? config.Paths.MqttValidateCert : 0,
+                            config.Paths.MqttSecureTls ? (config.Paths.MqttCaCert ?? string.Empty) : string.Empty);
+                        var wrapped = TemplateManifest.ForInfraRole("mqttConnectionWrapped");
                         builder.AddFB(FBIdGenerator.GenerateFBId(fbName), fbName,
-                            "Telemetry", "Main", x, y,
+                            wrapped.Name, TemplateManifest.NamespaceOf(wrapped), x, y,
                             new Dictionary<string, string> { ["Config"] = cfgLit });
                         return;
                     }
@@ -262,23 +256,24 @@ namespace CodeGen.Translation
                         ["URL"] = Iec61499Literal.FormatString(brokerUrl),
                         ["ClientIdentifier"] = Iec61499Literal.FormatString(clientIdentifier),
                     };
-                    if (config.MqttSecureTls)
+                    if (config.Paths.MqttSecureTls)
                     {
-                        p["ValidateCert"] = config.MqttValidateCert.ToString();
-                        if (!string.IsNullOrWhiteSpace(config.MqttCaCert))
-                            p["CACert"] = Iec61499Literal.FormatString(config.MqttCaCert);
+                        p["ValidateCert"] = config.Paths.MqttValidateCert.ToString();
+                        if (!string.IsNullOrWhiteSpace(config.Paths.MqttCaCert))
+                            p["CACert"] = Iec61499Literal.FormatString(config.Paths.MqttCaCert);
                     }
+                    var raw = TemplateManifest.ForInfraRole("mqttConnection");
                     builder.AddFB(FBIdGenerator.GenerateFBId(fbName), fbName,
-                        "MQTT_CONNECTION", "Runtime.NetConnectivity", x, y, p);
+                        raw.Name, TemplateManifest.NamespaceOf(raw), x, y, p);
                 }
 
-                bool tele = config.UseTelemetryCat;
+                bool tele = config.Paths.UseTelemetryCat;
 
                 // One connection per resource that this run emits, in telemetry.yml's declaration order -
                 // which is the order they land on the canvas. A resource whose publishers have no local
                 // connection drops every message silently, so the connection follows the RESOURCE, and
                 // which resources exist is the roster's answer, not a controller name here.
-                var connections = TelemetrySettings.Current.Connections
+                var connections = ctx.Cfg.Telemetry.Connections
                     .Where(c => TargetRegistry.IsRegistered(c.Plc) && ctx.Emits(c.Plc)).ToList();
 
                 string NameOf(MqttConnectionDeclaration c) => c.NameFor(tele);
@@ -289,9 +284,9 @@ namespace CodeGen.Translation
                     var resource = ctx.ResourceFor(c.Plc);
                     return c.BroughtUpBy switch
                     {
-                        MqttConnectionDeclaration.ByArea     => resource.AreaFb,
-                        MqttConnectionDeclaration.ByStation  => resource.StationFb,
-                        MqttConnectionDeclaration.ByRingHead => resource.InitAnchor,
+                        ConnectionStarter.Area     => resource.AreaFb,
+                        ConnectionStarter.Station  => resource.StationFb,
+                        ConnectionStarter.RingHead => resource.InitAnchor,
                         _ => null,
                     };
                 }
@@ -301,8 +296,10 @@ namespace CodeGen.Translation
                     var name = NameOf(c);
                     var row = c.IsDrawnAtRosterRow ? ctx.Roster.Get(name) : null;
                     int x = row?.X ?? ctx.Layout.Band(c.Plc).ColumnBaseX;
-                    int y = row?.Y ?? MqttConnectionRowY;
-                    InjectMqttConn(name, config.MqttConnectionName, c.Client, x, y);
+                    // The head-of-band row, which is what layout.yml calls Floating: above every
+                    // station and clear of them. Read, so it cannot drift from the roster's own rows.
+                    int y = row?.Y ?? ctx.Layout.RowY(nameof(LayoutRow.Floating));
+                    InjectMqttConn(name, config.Paths.MqttConnectionName, c.Client, x, y);
                 }
 
                 // Wired in the order the artefact carries: every connection the base topology already
@@ -325,14 +322,16 @@ namespace CodeGen.Translation
                 report.Missing.Add(
                     $"[MQTT] {(tele ? "Telemetry" : "MQTT_CONNECTION")} injected per resource — " +
                     string.Join(" + ", connections.Select(c => $"{NameOf(c)} ({c.Client})")) +
-                    $", shared ConnectionID={config.MqttConnectionName} so each resource's embedded " +
+                    $", shared ConnectionID={config.Paths.MqttConnectionName} so each resource's embedded " +
                     $"MqttPub binds locally; URL={brokerUrl}.");
             }
 
 
-            RingWiringPlanner.BuildFeedStationWiring(builder, ctx, processesOn[PlcAssignment.M262]);
-            RingWiringPlanner.BuildStation2Wiring(builder, ctx, processesOn[PlcAssignment.M580]);
-            RingWiringPlanner.BuildBx1Wiring(builder, ctx, processesOn[PlcAssignment.BX1]);
+            // One loop over the resources this run emits: each is wired from its own planned topology,
+            // so a new target is a device.yml row and a backend, not another wiring builder here.
+            foreach (var target in TargetRegistry.All)
+                if (ctx.Emits(target.Plc))
+                    RingWiringPlanner.Render(builder, ResourceWiringPlanner.For(ctx, target.Plc));
 
             // Cross-controller process-phase transport, one link per model-derived handoff whose producer and
             // consumer sit on different rings. CrossReference=True tells EAE to auto-generate the UDP proxy;
@@ -377,7 +376,7 @@ namespace CodeGen.Translation
 
             // Telemetry sidecar: lets a subscriber render the published phase ordinal as the twin's own
             // state name. Written outside the solution and read by nothing in the generated project.
-            if (config != null && config.MqttPublishEnabled && phaseNames.Count > 0)
+            if (config != null && config.Paths.MqttPublishEnabled && phaseNames.Count > 0)
             {
                 var mapPath = ProcessPhaseMapEmitter.Emit(
                     config, phaseNames, CodeGen.Services.MapperLogger.Info);
@@ -389,7 +388,7 @@ namespace CodeGen.Translation
         }
 
         // Default fallback timing used only when Control.xml omits or zeros out State.Time.
-        private static int DefaultMotionMs => GenerationConfig.Current.DefaultMotionMs;
+
 
         // Minimal params (actuator_name + actuator_id) for actuators that are NOT plain 5-state cylinders.
         // Rules the plan decided for this actuator; a CAT with no rule interface has none.
@@ -445,32 +444,6 @@ namespace CodeGen.Translation
             return p;
         }
 
-        public static int ResolveStateTimeMs(VueOneComponent actuator, int stateNumber, int fallbackMs)
-        {
-            var s = actuator.States.FirstOrDefault(st => st.StateNumber == stateNumber);
-            if (s == null || s.Time <= 0) return fallbackMs;
-            return s.Time;
-        }
-
-        // atWork = the static state at the far end of motion (StateNumber=2).
-        public static HashSet<string> ResolveAtWorkStateIds(VueOneComponent actuator)
-        {
-            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var s in actuator.States.Where(st => st.StateNumber == 2 && st.StaticState))
-                ids.Add(s.StateID);
-            return ids;
-        }
-
-        // atHome = static states at StateNumber=0 (Initial) and =4 (post-cycle latch).
-        public static HashSet<string> ResolveAtHomeStateIds(VueOneComponent actuator)
-        {
-            var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var s in actuator.States.Where(st =>
-                (st.StateNumber == 0 || st.StateNumber == 4) && st.StaticState))
-                ids.Add(s.StateID);
-            return ids;
-        }
-
         // SAFETY, for EVERY process: an actuator this recipe drives to work must be driven home by some
         // process in the model. Advancing and returning need not be the same one - a transfer that carries
         // a part across stations is advanced upstream and returned downstream, and holding it in between
@@ -491,9 +464,14 @@ namespace CodeGen.Translation
                 // A CAT that declares no command protocol folds its whole move into one handshake, so it
                 // has no advance to pair with a return. Asked of the DECLARATION, never of the name.
                 if (!ctx.CatTypes.TryGetValue(target, out var cat) ||
-                    TemplateManifest.ProtocolOrNull(cat)?.Command is not { Count: > 0 }) continue;
-                if (recipe.CmdStateArr[i] == 1) advanced.Add(target);
-                else if (recipe.CmdStateArr[i] == 3) returned.Add(target);
+                    TemplateManifest.ProtocolOrNull(cat) is not { Command.Count: > 0 } protocol) continue;
+                // WHICH command value drives it out and which drives it home is the CAT's declaration,
+                // so a CAT that numbers its commands differently is read correctly here.
+                var stop = protocol.Command.FirstOrDefault(kv => kv.Value == recipe.CmdStateArr[i]).Key;
+                if (stop == null) continue;
+                if (string.Equals(stop, CatProtocol.Home, StringComparison.OrdinalIgnoreCase))
+                    returned.Add(target);
+                else advanced.Add(target);
             }
             var stranded = advanced
                 .Where(a => !returned.Contains(a) &&
@@ -522,8 +500,8 @@ namespace CodeGen.Translation
         {
             // Recipe arrays travel as Process1_Generic Parameter values; withRecipe=false emits only the
             // two scalars and returns a null Recipe.
-            var config = ctx.Config;
-            bool emitProcessTelemetry = config.MqttPublishEnabled;
+            var config = ctx.Cfg;
+            bool emitProcessTelemetry = config.Paths.MqttPublishEnabled;
             int? receiverSlot = ctx.Handoffs.ReceiverSlotOf(process.Name);
             var outer = new Dictionary<string, string>
             {
