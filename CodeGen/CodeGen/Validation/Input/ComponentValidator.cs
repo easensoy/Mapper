@@ -89,13 +89,9 @@ namespace CodeGen.Validation
 
                     hasInitialState = true;
                 }
-                if (!hasInitialState)
-                {
-                    if (component.Type == "Sensor")
-                        result.AddWarning("Sensors are reactive - no initial state required");
-                    else
-                        result.AddError("No state marked as Initial_State");
-                }
+                // Whether the component declares an initial state is answered ONCE, after every state
+                // has been seen - asking inside the loop reports "no initial state" for each state
+                // examined before the one that declares it.
 
                 if (state.Time > 0)
                     result.AddInfo($"⚠ State '{state.Name}' Time={state.Time}ms (DISCARDED - VueOne specific)");
@@ -119,6 +115,12 @@ namespace CodeGen.Validation
         public List<string> Errors { get; } = new();
         public List<string> Warnings { get; } = new();
         public List<string> InfoMessages { get; } = new();
+
+        // Everything worth telling an operator about this component, in one line. Errors first,
+        // because a component that failed is why they are reading it at all.
+        public string Summary =>
+            string.Join("; ", Errors.Concat(Warnings.Select(w => "warning: " + w))
+                                    .Concat(InfoMessages.Select(i => "note: " + i)));
 
         public bool IsValid => Errors.Count == 0;
 
