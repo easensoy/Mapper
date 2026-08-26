@@ -104,7 +104,7 @@ namespace MapperTests
             // Every DEVICE-HOSTED component must name a real controller. Boot rows (FB1/FB2-class
             // scaffolding, Column -1) are deliberately unassigned and are excluded by design.
             foreach (var e in byName.Values.Where(e => e.Row != LayoutRow.Boot))
-                Assert.True(TargetRegistry.IsRegistered(e.Plc),
+                Assert.True(TestConfig.Cfg.Targets.IsRegistered(e.Plc),
                     $"component '{e.Name}' has no controller assignment ({e.Plc})");
         }
 
@@ -112,9 +112,9 @@ namespace MapperTests
         public void RevPi_selection_never_moves_M580_or_BX1_components()
         {
             var before = Roster(M262).All
-                .Where(e => TargetRegistry.IsRegistered(e.Plc) &&
-                            e.Plc != TargetRegistry.FeedTarget &&
-                            !TargetRegistry.Of(e.Plc).ReceivesRelocatedComponents)
+                .Where(e => TestConfig.Cfg.Targets.IsRegistered(e.Plc) &&
+                            e.Plc != TestConfig.Cfg.Targets.FeedTarget &&
+                            !TestConfig.Cfg.Targets.Of(e.Plc).ReceivesRelocatedComponents)
                 .ToDictionary(e => e.Name, e => e.Plc, StringComparer.Ordinal);
 
             var after = Roster(RevPiComponents("Feeder", "Checker", "PartInHopper"));
@@ -136,7 +136,7 @@ namespace MapperTests
         public void Relocated_components_are_bound_to_the_RevPi_resource()
         {
             var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
-            var expected = TargetRegistry.Of(PlcAssignment.Named("RevPi")).ResourceName;
+            var expected = TestConfig.Cfg.Targets.Of(PlcAssignment.Named("RevPi")).ResourceName;
             Assert.False(string.IsNullOrWhiteSpace(expected));
             Assert.Equal(expected, Roster(profile).Get("Feeder")!.Resource);
         }
