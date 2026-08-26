@@ -18,8 +18,8 @@ namespace CodeGen.Devices.Core
 
         // The name EAE shows the device under, declared beside its addresses. Refused rather than
         // defaulted: an unnamed device is one an engineer cannot find in the tree.
-        static string DeviceNameOf(CodeGen.Translation.PlcAssignment plc) =>
-            TargetRegistry.Of(plc).DeviceName
+        static string DeviceNameOf(Mapping.TargetIndex targets, CodeGen.Translation.PlcAssignment plc) =>
+            targets.Of(plc).DeviceName
             ?? throw new InvalidOperationException(
                 $"device.yml declares no deviceName for target '{plc}', so its system device has no name.");
 
@@ -36,8 +36,8 @@ namespace CodeGen.Devices.Core
         static string M580ResourceId => M580Id.Resource;
         static string BX1ResourceId => Bx1Id.Resource;
         // M580 name "RES0" is the EAE default and what M580IO.hcf symlinks use; a custom name makes EAE track its default RES0 as well.
-        static readonly string M580ResourceName = TargetRegistry.Of(Translation.PlcAssignment.Named("M580")).ResourceName;
-        static readonly string BX1ResourceName  = TargetRegistry.Of(Translation.PlcAssignment.Named("BX1")).ResourceName;
+        static string M580ResourceName(Mapping.TargetIndex t) => t.Of(Translation.PlcAssignment.Named("M580")).ResourceName;
+        static string BX1ResourceName(Mapping.TargetIndex t)  => t.Of(Translation.PlcAssignment.Named("BX1")).ResourceName;
 
         static string M580EquipmentUuid => M580Id.Equipment;
         static string M580RuntimeUuid => M580Id.Runtime;
@@ -85,18 +85,18 @@ namespace CodeGen.Devices.Core
 
             EmitOnePlc(cfg, scope.EaeRoot, scope.SystemGuidDir, result,
                 sysdevId: M580SysdevId,
-                deviceName: DeviceNameOf(CodeGen.Translation.PlcAssignment.Named("M580")),
-                deviceType: TargetRegistry.Of(CodeGen.Translation.PlcAssignment.Named("M580")).DeviceType,
+                deviceName: DeviceNameOf(cfg.Targets, CodeGen.Translation.PlcAssignment.Named("M580")),
+                deviceType: cfg.Targets.Of(CodeGen.Translation.PlcAssignment.Named("M580")).DeviceType,
                 resourceId: M580ResourceId,
-                resourceName: M580ResourceName,
+                resourceName: M580ResourceName(cfg.Targets),
                 hcfTemplatePath: cfg.Paths.M580HcfTemplatePath,
                 equipmentJsonName: "Equipment_M580dPAC_1.json",
                 equipmentBuilder: () => BuildM580EquipmentJson(cfg, M580SysdevId, scope.SolutionId,
                                           cfg.Devices.M580.TargetIp, cfg.Paths.M580BroadcastDomainUuid),
                 deployPluginPropertiesXml: BuildDeployPluginPropertiesXml(cfg, bootProject: false,
                     cfg.Telemetry.PublishEnabled && !cfg.Telemetry.SecureTls),
-                simulationBindingDeployPort: TargetRegistry.Of(CodeGen.Translation.PlcAssignment.Named("M580")).SimulationDeployPort,
-                simulationBindingArchivePort: TargetRegistry.Of(CodeGen.Translation.PlcAssignment.Named("M580")).SimulationArchivePort);
+                simulationBindingDeployPort: cfg.Targets.Of(CodeGen.Translation.PlcAssignment.Named("M580")).SimulationDeployPort,
+                simulationBindingArchivePort: cfg.Targets.Of(CodeGen.Translation.PlcAssignment.Named("M580")).SimulationArchivePort);
             return result;
         }
 
@@ -119,10 +119,10 @@ namespace CodeGen.Devices.Core
 
             EmitOnePlc(cfg, scope.EaeRoot, scope.SystemGuidDir, result,
                 sysdevId: BX1SysdevId,
-                deviceName: DeviceNameOf(CodeGen.Translation.PlcAssignment.Named("BX1")),
-                deviceType: TargetRegistry.Of(CodeGen.Translation.PlcAssignment.Named("BX1")).DeviceType,
+                deviceName: DeviceNameOf(cfg.Targets, CodeGen.Translation.PlcAssignment.Named("BX1")),
+                deviceType: cfg.Targets.Of(CodeGen.Translation.PlcAssignment.Named("BX1")).DeviceType,
                 resourceId: bx1ResourceId,
-                resourceName: BX1ResourceName,
+                resourceName: BX1ResourceName(cfg.Targets),
                 hcfTemplatePath: bx1HcfPath,
                 equipmentJsonName: "Equipment_HMIB1X_1.json",
                 equipmentBuilder: () => BuildBX1HmiB1XEquipmentJson(cfg, BX1SysdevId, scope.SolutionId,
@@ -130,8 +130,8 @@ namespace CodeGen.Devices.Core
                 // The insecure-app override lets a plain mqtt:// connection avoid RC101.
                 deployPluginPropertiesXml: BuildSoftDpacDeployPluginPropertiesXml(cfg,
                     cfg.Telemetry.PublishEnabled && !cfg.Telemetry.SecureTls),
-                simulationBindingDeployPort: TargetRegistry.Of(CodeGen.Translation.PlcAssignment.Named("BX1")).SimulationDeployPort,
-                simulationBindingArchivePort: TargetRegistry.Of(CodeGen.Translation.PlcAssignment.Named("BX1")).SimulationArchivePort);
+                simulationBindingDeployPort: cfg.Targets.Of(CodeGen.Translation.PlcAssignment.Named("BX1")).SimulationDeployPort,
+                simulationBindingArchivePort: cfg.Targets.Of(CodeGen.Translation.PlcAssignment.Named("BX1")).SimulationArchivePort);
 
             EmitBx1EtherNetIpDevice(cfg, scope.EaeRoot, result, scope.SolutionId);
             // The scanner instantiates coupler type Main.TM3BC_Ethe_yYhtt9jWKUOJs; without its saved
@@ -495,17 +495,17 @@ namespace CodeGen.Devices.Core
 
         // Declared on the BX1's own device.yml row: the coupler type its scanner instantiates, and
         // the HwConfiguration model folders that carry it.
-        static string Bx1EtherNetIpDeviceType => EtherNetIpTarget.EtherNetIpDeviceType;
-        static IReadOnlyList<string> Bx1Tm3bcModelFolders => EtherNetIpTarget.HwConfigModelFolders;
+        static string Bx1EtherNetIpDeviceType(Mapping.TargetIndex t) => EtherNetIpTarget(t).EtherNetIpDeviceType;
+        static IReadOnlyList<string> Bx1Tm3bcModelFolders(Mapping.TargetIndex t) => EtherNetIpTarget(t).HwConfigModelFolders;
         // The target is the one that DECLARES an EtherNet/IP coupler, not the one with a known name:
         // moving the scanner to another device is then a device.yml edit. Two claimants is refused,
         // because the coupler type is deployed once and both would silently share it.
-        static TargetDescriptor EtherNetIpTarget =>
-            TargetRegistry.All.Where(t => !string.IsNullOrWhiteSpace(t.EtherNetIpDeviceType)).ToList() is { Count: 1 } one
+        static TargetDescriptor EtherNetIpTarget(Mapping.TargetIndex targets) =>
+            targets.All.Where(t => !string.IsNullOrWhiteSpace(t.EtherNetIpDeviceType)).ToList() is { Count: 1 } one
                 ? one[0]
                 : throw new InvalidOperationException(
                     "[Topology] device.yml must declare etherNetIpDeviceType on exactly one target: " +
-                    string.Join(", ", TargetRegistry.All
+                    string.Join(", ", targets.All
                         .Where(t => !string.IsNullOrWhiteSpace(t.EtherNetIpDeviceType))
                         .Select(t => t.Plc.Name)) + " claim it.");
 
@@ -515,19 +515,19 @@ namespace CodeGen.Devices.Core
             try
             {
                 var libRoot = cfg.Paths.RequireTemplateLibraryPath();
-                var srcIec = Path.Combine(libRoot, "EtherNetIP", "IEC61499", Bx1EtherNetIpDeviceType);
-                var srcHmi = Path.Combine(libRoot, "EtherNetIP", "HMI", Bx1EtherNetIpDeviceType);
+                var srcIec = Path.Combine(libRoot, "EtherNetIP", "IEC61499", Bx1EtherNetIpDeviceType(cfg.Targets));
+                var srcHmi = Path.Combine(libRoot, "EtherNetIP", "HMI", Bx1EtherNetIpDeviceType(cfg.Targets));
                 if (!Directory.Exists(srcIec))
                 {
                     result.Warnings.Add(
-                        $"[BX1] EtherNet/IP device type '{Bx1EtherNetIpDeviceType}' NOT found in the " +
+                        $"[BX1] EtherNet/IP device type '{Bx1EtherNetIpDeviceType(cfg.Targets)}' NOT found in the " +
                         $"Template Library ('{srcIec}'). BX1 will fail to compile (ERR_NO_SUCH_TYPE). " +
                         "Stage it from the reference project's IEC61499 + HMI folders.");
                     return;
                 }
 
-                var dstIec = Path.Combine(eaeRoot, "IEC61499", Bx1EtherNetIpDeviceType);
-                var dstHmi = Path.Combine(eaeRoot, "HMI", Bx1EtherNetIpDeviceType);
+                var dstIec = Path.Combine(eaeRoot, "IEC61499", Bx1EtherNetIpDeviceType(cfg.Targets));
+                var dstHmi = Path.Combine(eaeRoot, "HMI", Bx1EtherNetIpDeviceType(cfg.Targets));
                 CopyDirectory(srcIec, dstIec);
                 if (Directory.Exists(srcHmi)) CopyDirectory(srcHmi, dstHmi);
                 result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, dstIec));
@@ -535,16 +535,16 @@ namespace CodeGen.Devices.Core
                 var dfbproj = EaeProjectLayout.FindDfbproj(eaeRoot);
                 if (dfbproj != null)
                 {
-                    int added = DfbprojRegistrar.RegisterHardwareDeviceCat(dfbproj, Bx1EtherNetIpDeviceType);
+                    int added = DfbprojRegistrar.RegisterHardwareDeviceCat(dfbproj, Bx1EtherNetIpDeviceType(cfg.Targets));
                     result.Warnings.Add(added > 0
-                        ? $"[BX1] EtherNet/IP device type '{Bx1EtherNetIpDeviceType}' deployed + registered " +
+                        ? $"[BX1] EtherNet/IP device type '{Bx1EtherNetIpDeviceType(cfg.Targets)}' deployed + registered " +
                           $"({added} dfbproj entr{(added == 1 ? "y" : "ies")}); gate types compile-generated by EAE."
-                        : $"[BX1] EtherNet/IP device type '{Bx1EtherNetIpDeviceType}' deployed (dfbproj already current).");
+                        : $"[BX1] EtherNet/IP device type '{Bx1EtherNetIpDeviceType(cfg.Targets)}' deployed (dfbproj already current).");
                 }
                 else
                 {
                     result.Warnings.Add(
-                        $"[BX1] EtherNet/IP device type '{Bx1EtherNetIpDeviceType}' copied but no .dfbproj " +
+                        $"[BX1] EtherNet/IP device type '{Bx1EtherNetIpDeviceType(cfg.Targets)}' copied but no .dfbproj " +
                         "found to register it — BX1 may not compile.");
                 }
             }
@@ -554,17 +554,17 @@ namespace CodeGen.Devices.Core
             }
         }
 
-        static void SweepBx1EtherNetIpType(string eaeRoot, EmitResult result)
+        static void SweepBx1EtherNetIpType(string eaeRoot, EmitResult result, Mapping.TargetIndex targets)
         {
             try
             {
-                var dstIec = Path.Combine(eaeRoot, "IEC61499", Bx1EtherNetIpDeviceType);
-                var dstHmi = Path.Combine(eaeRoot, "HMI", Bx1EtherNetIpDeviceType);
+                var dstIec = Path.Combine(eaeRoot, "IEC61499", Bx1EtherNetIpDeviceType(targets));
+                var dstHmi = Path.Combine(eaeRoot, "HMI", Bx1EtherNetIpDeviceType(targets));
                 if (Directory.Exists(dstIec)) Directory.Delete(dstIec, recursive: true);
                 if (Directory.Exists(dstHmi)) Directory.Delete(dstHmi, recursive: true);
                 var dfbproj = EaeProjectLayout.FindDfbproj(eaeRoot);
                 if (dfbproj != null)
-                    DfbprojRegistrar.UnregisterHardwareDeviceCat(dfbproj, Bx1EtherNetIpDeviceType);
+                    DfbprojRegistrar.UnregisterHardwareDeviceCat(dfbproj, Bx1EtherNetIpDeviceType(targets));
             }
             catch (Exception ex)
             {
@@ -595,7 +595,7 @@ namespace CodeGen.Devices.Core
                 Directory.CreateDirectory(dstHc);
 
                 var subs = new List<string> { Path.Combine("EIPSolutionsV2", Bx1HwConfigScannerId) };
-                subs.AddRange(Bx1Tm3bcModelFolders);
+                subs.AddRange(Bx1Tm3bcModelFolders(cfg.Targets));
                 foreach (var sub in subs)
                 {
                     var s = Path.Combine(srcHc, sub);
@@ -622,7 +622,7 @@ namespace CodeGen.Devices.Core
                             "template exists in 'EtherNetIP/HwConfiguration' — the scanner cannot be " +
                             "registered and EAE will compile an EMPTY scanner. Stage the project shell.");
                 }
-                int reg = RegisterBx1HwConfigScannerModel(hwproj);
+                int reg = RegisterBx1HwConfigScannerModel(hwproj, cfg.Targets);
                 result.FilesWritten.Add(Path.GetRelativePath(eaeRoot,
                     Path.Combine(dstHc, "EIPSolutionsV2", Bx1HwConfigScannerId, "scanner.xml")));
                 result.Warnings.Add(
@@ -671,14 +671,14 @@ namespace CodeGen.Devices.Core
                     ". Fix: close EAE, confirm the Template Library 'EtherNetIP/HwConfiguration' model exists, then re-run Test Runtime.");
         }
 
-        static void SweepBx1HwConfigScannerModel(string eaeRoot, EmitResult result)
+        static void SweepBx1HwConfigScannerModel(string eaeRoot, EmitResult result, Mapping.TargetIndex targets)
         {
             try
             {
                 var dstHc = Path.Combine(eaeRoot, "HwConfiguration");
                 if (!Directory.Exists(dstHc)) return;
                 var subs = new List<string> { Path.Combine("EIPSolutionsV2", Bx1HwConfigScannerId) };
-                subs.AddRange(Bx1Tm3bcModelFolders);
+                subs.AddRange(Bx1Tm3bcModelFolders(targets));
                 foreach (var sub in subs)
                 {
                     var d = Path.Combine(dstHc, sub);
@@ -687,7 +687,7 @@ namespace CodeGen.Devices.Core
                 var eip = Path.Combine(dstHc, "EIPSolutionsV2");
                 if (Directory.Exists(eip) && !Directory.EnumerateFileSystemEntries(eip).Any())
                     Directory.Delete(eip);
-                UnregisterBx1HwConfigScannerModel(Path.Combine(dstHc, "HwConfiguration.hwconfigproj"));
+                UnregisterBx1HwConfigScannerModel(Path.Combine(dstHc, "HwConfiguration.hwconfigproj"), targets);
             }
             catch (Exception ex)
             {
@@ -695,7 +695,7 @@ namespace CodeGen.Devices.Core
             }
         }
 
-        static int RegisterBx1HwConfigScannerModel(string hwproj)
+        static int RegisterBx1HwConfigScannerModel(string hwproj, Mapping.TargetIndex targets)
         {
             if (!File.Exists(hwproj)) return 0;
             var xml = XDocument.Load(hwproj);
@@ -717,7 +717,7 @@ namespace CodeGen.Devices.Core
                 group.Add(el); added++;
             }
 
-            foreach (var t in Bx1Tm3bcModelFolders)
+            foreach (var t in Bx1Tm3bcModelFolders(targets))
             {
                 AddItem(ref cg, "Compile", $@"{t}\{t}.prop.cs", null);
                 AddItem(ref cg, "Compile", $@"{t}\{t}.script.cs", null);
@@ -728,13 +728,13 @@ namespace CodeGen.Devices.Core
 
             AddItem(ref fg, "Folder", "EIPSolutionsV2", null);
             AddItem(ref fg, "Folder", $@"EIPSolutionsV2\{Bx1HwConfigScannerId}", null);
-            foreach (var t in Bx1Tm3bcModelFolders) AddItem(ref fg, "Folder", t, null);
+            foreach (var t in Bx1Tm3bcModelFolders(targets)) AddItem(ref fg, "Folder", t, null);
 
             if (added > 0) xml.Save(hwproj);
             return added;
         }
 
-        static void UnregisterBx1HwConfigScannerModel(string hwproj)
+        static void UnregisterBx1HwConfigScannerModel(string hwproj, Mapping.TargetIndex targets)
         {
             if (!File.Exists(hwproj)) return;
             var xml = XDocument.Load(hwproj, LoadOptions.PreserveWhitespace);
@@ -747,7 +747,7 @@ namespace CodeGen.Devices.Core
                     var inc = (string?)el.Attribute("Include");
                     if (string.IsNullOrEmpty(inc)) continue;
                     bool match = inc.StartsWith("EIPSolutionsV2", StringComparison.OrdinalIgnoreCase)
-                              || Bx1Tm3bcModelFolders.Any(t => inc.Equals(t, StringComparison.OrdinalIgnoreCase)
+                              || Bx1Tm3bcModelFolders(targets).Any(t => inc.Equals(t, StringComparison.OrdinalIgnoreCase)
                                      || inc.StartsWith(t + @"\", StringComparison.OrdinalIgnoreCase));
                     if (!match) continue;
                     var nextWs = el.NextNode as XText;
