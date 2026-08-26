@@ -108,36 +108,71 @@ namespace MapperTests
             }
         }
 
-        // ---- what cannot FIRE is emitted and named ---------------------------------------------------
+        // ---- what cannot FIRE is REFUSED ------------------------------------------------------------
 
         [Fact]
-        public void A_conjunction_naming_one_source_at_two_stops_is_emitted_and_reported()
+        public void A_conjunction_naming_one_source_at_two_stops_is_refused_before_anything_is_written()
         {
             // The twin states it as one ConditionGroup, which is a conjunction, and a source cannot be
-            // at two stops at once. The compiler does not reinterpret that as an OR and does not drop a
-            // term to make it fire - it emits what the model says and names the defect.
+            // at two stops at once. Such a rule is emitted with a non-zero count and can never fire, so
+            // the actuator moves freely while the model, the rule table and the panel all claim it is
+            // guarded. The compiler will not ship that: it refuses, and it refuses on the AUTHORED
+            // model rather than on a corrected copy.
+            var authored = System.IO.Path.Combine(RepoRoot(), "Gate", "fixtures", "models",
+                "SMC_Vue2VC_With_Processes_se", "Control.xml");
+
+            var refusal = Assert.Throws<CodeGen.Translation.Interlocks.UnsatisfiableInterlockException>(
+                () => GenerationContext.Plan(TestConfig.Cfg, authored,
+                          DeploymentProfile.AsPlaced(TestConfig.Cfg)));
+
+            // The diagnostic has to be actionable without opening the compiler: which actuator, which
+            // state, which conditions, and the edit that fixes the model.
+            Assert.Equal("Shaft_Hr", refusal.Actuator);
+            Assert.Equal("TurningWork", refusal.State);
+            Assert.Equal("Bearing_PnP", refusal.SourceComponent);
+            Assert.Contains("Place", refusal.Message);
+            Assert.Contains("AtPlace2", refusal.Message);
+            Assert.Contains("ConditionGroup", refusal.Message);
+            Assert.Contains("guarded by nothing", refusal.Message);
+        }
+
+        [Fact]
+        public void The_compiler_neither_reinterprets_the_AND_nor_drops_a_term_to_make_it_fire()
+        {
+            // Both would invent a safety rule the twin never stated, and both would let the run
+            // continue. The refusal is what proves neither happened: had either been applied, planning
+            // would have succeeded.
+            var authored = System.IO.Path.Combine(RepoRoot(), "Gate", "fixtures", "models",
+                "SMC_Vue2VC_With_Processes_vc", "Control.xml");
+
+            Assert.Throws<CodeGen.Translation.Interlocks.UnsatisfiableInterlockException>(
+                () => GenerationContext.Plan(TestConfig.Cfg, authored,
+                          DeploymentProfile.AsPlaced(TestConfig.Cfg)));
+        }
+
+        [Fact]
+        public void A_model_that_states_one_stop_compiles()
+        {
+            // The same plant modelled with a two-position swivel names one stop, so there is no
+            // contradiction. The refusal is about the MODEL, not about the compiler: a valid twin is
+            // unaffected by it.
+            Assert.DoesNotContain(Twin("_sw5").SemanticFindings,
+                f => f.StartsWith("UNSATISFIABLE INTERLOCK"));
+        }
+
+        [Fact]
+        public void The_correction_the_refusal_asks_for_makes_the_model_compile()
+        {
+            // The remedy is not just describable, it works: splitting the clashing conditions into
+            // separate ConditionGroups - which is what TestTwin applies - produces a model that plans,
+            // and the guard survives as ALTERNATIVES rather than being dropped.
             var ctx = Twin("_se");
-
-            var finding = ctx.SemanticFindings.FirstOrDefault(f => f.StartsWith("UNSATISFIABLE INTERLOCK"));
-            Assert.NotNull(finding);
-            Assert.Contains("Shaft_Hr", finding);
-            Assert.Contains("ConditionGroup", finding);          // the remedy, in the twin's own terms
-
-            // Emitted, not dropped: both stops of that source are in the rule table.
             var plan = ctx.Interlocks["Shaft_Hr"];
             var swivel = ctx.Slots["Bearing_PnP"];
             var stops = Enumerable.Range(0, plan.Count)
                 .Where(i => plan.Src[i] == swivel).Select(i => plan.Blocked[i]).Distinct().ToList();
-            Assert.True(stops.Count > 1, "both declared stops of the source must be present");
-        }
-
-        [Fact]
-        public void A_model_that_states_one_stop_reports_nothing()
-        {
-            // The same plant modelled with a two-position swivel names one stop, so there is no
-            // contradiction to report. The finding is about the MODEL, not about the compiler.
-            Assert.DoesNotContain(Twin("_sw5").SemanticFindings,
-                f => f.StartsWith("UNSATISFIABLE INTERLOCK"));
+            Assert.True(stops.Count > 1,
+                "after the correction the guard must block at BOTH declared stops, as alternatives");
         }
 
         // ---- one owner for "which number names this stop" --------------------------------------------
@@ -171,8 +206,7 @@ namespace MapperTests
 
         private static GenerationContext Twin(string suffix)
         {
-            var path = System.IO.Path.Combine(RepoRoot(), "Gate", "fixtures", "models",
-                "SMC_Vue2VC_With_Processes" + suffix, "Control.xml");
+            var path = TestTwin.CompilableFixturePath(suffix);
             return GenerationContext.Plan(TestConfig.Cfg, path,
                 DeploymentProfile.AsPlaced(TestConfig.Cfg));
         }
