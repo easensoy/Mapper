@@ -50,7 +50,7 @@ namespace CodeGen.Mapping
                     // canvas cell, so the layout still reads as the plant, not as the wiring.
                     var plc = profile.AssignedTarget(e.Name) ?? e.Plc;
                     var band = layout.Band(e.Plc);
-                    return new ComponentEntry(e.Name, plc, TargetRegistry.Of(plc).ResourceName,
+                    return new ComponentEntry(e.Name, plc, profile.Targets.Of(plc).ResourceName,
                         e.Column, Enum.Parse<LayoutRow>(e.Row, ignoreCase: true),
                         band.ColumnBaseX + e.Column * layout.Geometry.ColumnPitchX,
                         layout.RowY(e.Row));
@@ -199,7 +199,7 @@ namespace CodeGen.Mapping
                 while (!used.Add((plc, row, column))) column++;
 
                 var band = layout.Band(plc);
-                _byName[name] = new ComponentEntry(name, plc, TargetRegistry.Of(plc).ResourceName,
+                _byName[name] = new ComponentEntry(name, plc, Profile.Targets.Of(plc).ResourceName,
                     column, row,
                     band.ColumnBaseX + column * layout.Geometry.ColumnPitchX,
                     layout.RowY(row.ToString()));
