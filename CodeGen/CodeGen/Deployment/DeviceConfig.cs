@@ -179,6 +179,9 @@
 
     public sealed class DeviceNet
     {
+        // The broadcast domain this network is, where it has its own identity.
+        public string DomainUuid { get; set; } = string.Empty;
+
         public string TargetIp { get; set; } = string.Empty;
 
         // Components only this target's own I/O hardware can read, so it must host them.
