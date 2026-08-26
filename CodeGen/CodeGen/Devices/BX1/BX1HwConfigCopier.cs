@@ -11,9 +11,9 @@ namespace CodeGen.Devices.BX1
     // project; authoritative final pass so the config survives the wiper's empty-shell reset.
     public static class BX1HwConfigCopier
     {
-        public static HwConfigCopyResult Copy(MapperConfig cfg)
+        public static HwConfigCopyResult Copy(Configuration.CompilerConfiguration cfg)
         {
-            var copied = HwConfigVerbatimCopier.CopyFor(cfg, CodeGen.Translation.PlcAssignment.BX1, cfg.BX1HcfTemplatePath);
+            var copied = HwConfigVerbatimCopier.CopyFor(cfg, CodeGen.Translation.PlcAssignment.Named("BX1"), cfg.Paths.BX1HcfTemplatePath);
             // Must run AFTER HwConfiguration/ is rebuilt: an in-EmitAll deploy no-ops here, leaving an
             // EMPTY EIPSCANNER2.xml so the cover I/O never reaches the coupler.
             Station2DeviceEmitter.DeployBx1ScannerModelFinalPass(cfg);
