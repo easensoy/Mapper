@@ -44,6 +44,12 @@ namespace CodeGen.Configuration
         // The same declarations against a different roster. Returns a NEW snapshot rather than
         // mutating this one, so a caller that overrides the layout cannot change what another
         // caller is compiling against.
+        // The same declarations addressing a different output tree. Used by the transaction to point
+        // a run at its staging copy; every other path the compiler resolves is derived from these.
+        public CompilerConfiguration With(MapperConfig paths) =>
+            new(paths ?? throw new ArgumentNullException(nameof(paths)),
+                Devices, Generation, Telemetry, Rig, Interlocks, Templates, Layout);
+
         public CompilerConfiguration With(LayoutCatalog layout) =>
             new(Paths, Devices, Generation, Telemetry, Rig, Interlocks, Templates,
                 layout ?? throw new ArgumentNullException(nameof(layout)));
