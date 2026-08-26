@@ -87,7 +87,7 @@ namespace MapperTests
 
             var ex = Assert.Throws<InvalidOperationException>(() => ReportGraph.Build(
                 twin, Allocation(twin),
-                RigCatalog.Current.CrossRingSegment, Array.Empty<string>(), Graphs(twin)));
+                RigCatalog.Current.CrossRingSegment, Array.Empty<string>(), Graphs(twin), TestConfig.Cfg.Targets));
 
             Assert.Contains("[Transport]", ex.Message, StringComparison.Ordinal);
             Assert.Contains(FeedActuator, ex.Message, StringComparison.Ordinal);
@@ -113,7 +113,7 @@ namespace MapperTests
             var twin = TwinModel.Build(new[] { feed, assembly, here, there });
 
             var g = ReportGraph.Build(twin, Allocation(twin),
-                RigCatalog.Current.CrossRingSegment, Array.Empty<string>(), Graphs(twin));
+                RigCatalog.Current.CrossRingSegment, Array.Empty<string>(), Graphs(twin), TestConfig.Cfg.Targets);
 
             Assert.True(g.RingsMerged);
             Assert.True(g.SameDomain(FeedActuator, AssemblyActuator));
@@ -129,7 +129,7 @@ namespace MapperTests
             var twin = TwinModel.Build(new[] { feed, driven });
 
             var g = ReportGraph.Build(twin, Allocation(twin),
-                RigCatalog.Current.CrossRingSegment, Array.Empty<string>(), Graphs(twin));
+                RigCatalog.Current.CrossRingSegment, Array.Empty<string>(), Graphs(twin), TestConfig.Cfg.Targets);
 
             Assert.Empty(g.DischargeSegment);
         }
