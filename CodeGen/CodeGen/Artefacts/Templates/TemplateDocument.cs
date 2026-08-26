@@ -11,11 +11,11 @@ namespace CodeGen.Services
     // values the model or the profile decides.
     internal static class TemplateDocument
     {
-        internal static string Load(MapperConfig? cfg, string relativePath,
+        internal static string Load(Configuration.CompilerConfiguration? cfg, string relativePath,
             IReadOnlyDictionary<string, string>? tokens = null)
         {
             var path = Path.Combine(
-                (cfg ?? throw new ArgumentNullException(nameof(cfg))).RequireTemplateLibraryPath(),
+                (cfg ?? throw new ArgumentNullException(nameof(cfg))).Paths.RequireTemplateLibraryPath(),
                 relativePath);
             if (!File.Exists(path))
                 throw new FileNotFoundException($"Template Library document not found: {path}", path);
