@@ -30,7 +30,7 @@ namespace MapperTests
 
         private static List<string> Errors(
             IEnumerable<TargetIdentity> targets, List<BootFbDeclaration>? sequence = null) =>
-            TargetRegistry.BootProfileErrors(targets.ToList(), sequence ?? Sequence()).ToList();
+            TargetIndex.BootProfileErrors(targets.ToList(), sequence ?? Sequence()).ToList();
 
         [Fact]
         public void A_complete_profile_raises_nothing()
@@ -106,7 +106,7 @@ namespace MapperTests
             rows.Select(r => new BringUpWire { From = r.From, To = r.To }).ToList();
 
         private static List<string> WireErrors(List<BringUpWire> wires) =>
-            TargetRegistry.BringUpErrors(wires, Sequence()).ToList();
+            TargetIndex.BringUpErrors(wires, Sequence(), TestConfig.Cfg.Manifest).ToList();
 
         [Fact]
         public void A_bring_up_naming_only_declared_roles_raises_nothing()
@@ -156,11 +156,11 @@ namespace MapperTests
         {
             var wires = DeviceConfig.Current.BringUp;
             Assert.NotEmpty(wires);
-            Assert.Empty(TargetRegistry.BringUpErrors(wires, DeviceConfig.Current.BootSequence));
+            Assert.Empty(TargetIndex.BringUpErrors(wires, DeviceConfig.Current.BootSequence, TestConfig.Cfg.Manifest));
             // Emission order is the artefact's order, so the rendered pairs follow the declaration.
             Assert.Equal(
                 wires.Select(w => (w.From, w.To)).ToList(),
-                TargetBootstrap.BringUp.ToList());
+                TestConfig.Cfg.Targets.BringUp.ToList());
         }
 
         [Fact]
@@ -169,13 +169,13 @@ namespace MapperTests
             // The real device.yml, joined and validated: each target answers every declared role, in order.
             var roles = DeviceConfig.Current.BootSequence.Select(b => b.Role).ToList();
             Assert.NotEmpty(roles);
-            foreach (var target in TargetRegistry.All)
+            foreach (var target in TestConfig.Cfg.Targets.All)
             {
                 Assert.Equal(roles, target.BootFbs.Select(b => b.Role).ToList());
                 Assert.All(target.BootFbs, b => Assert.Matches("^[0-9A-F]{16}$", b.Id));
             }
             // and no id is shared, which EAE would load as a single FB.
-            var ids = TargetRegistry.All.SelectMany(t => t.BootFbs).Select(b => b.Id).ToList();
+            var ids = TestConfig.Cfg.Targets.All.SelectMany(t => t.BootFbs).Select(b => b.Id).ToList();
             Assert.Equal(ids.Count, ids.Distinct().Count());
         }
     }
