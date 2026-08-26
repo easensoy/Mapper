@@ -1,19 +1,14 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
 using CodeGen.Translation;
-using CodeGen.Mapping;
 
 namespace CodeGen.Mapping
 {
-    // Allocation questions answered from the target registry, which owns the facts. Kept as a named lens
-    // because "is this the Feed controller?" reads better than a descriptor field at every call site.
+    // A NAMED LENS onto the target registry, kept for the separately-owned HMI module, which compiles
+    // against these names. It holds no facts: every answer is the registry's, so the panel and the
+    // compiler cannot describe a target differently.
+    //
+    // The compiler itself asks TargetRegistry directly. Nothing new should be added here.
     public static class ControllerMap
     {
         public static string ResourceForPlc(PlcAssignment plc) => TargetRegistry.Of(plc).ResourceName;
-
-        public static bool IsFeedController(PlcAssignment plc) =>
-            TargetRegistry.IsRegistered(plc) && TargetRegistry.Of(plc).HostsFeedStation;
-
     }
 }
