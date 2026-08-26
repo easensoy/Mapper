@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Configuration;
@@ -16,6 +16,15 @@ namespace MapperTests
     /// come out whatever the components are named.
     public sealed class ReportDomainTests
     {
+        // A process states its own entry; ProcessGraph refuses a process that does not, because
+        // starting a recipe at an arbitrary state runs the plant mid-cycle.
+        private static VueOneState Entry(string id, string name, int number)
+        {
+            var s = Stop(id, name, number);
+            s.InitialState = true;
+            return s;
+        }
+
         private static VueOneState Stop(string id, string name, int number) => new()
         {
             StateID = id, Name = name, StateNumber = number, StaticState = true,
@@ -44,21 +53,27 @@ namespace MapperTests
         private static VueOneComponent Process(string id, string name) => new()
         {
             ComponentID = id, Name = name, Type = "Process",
-            States = new List<VueOneState> { Stop(id + "-s0", "Initialisation", 0) },
+            States = new List<VueOneState> { Entry(id + "-s0", "Initialisation", 0) },
         };
 
         private static ControllerAllocation Allocation(TwinModel twin)
         {
-            var roster = new DeploymentRoster(DeploymentProfile.M262Only(LayoutCatalog.Load()));
+            var roster = new DeploymentRoster(DeploymentProfile.AsPlaced(TestConfig.Cfg));
             roster.PlaceUnlisted(twin);
             return new ControllerAllocation(roster);
         }
+
+        // ProcessGraph is where a process's control flow is resolved and validated; ReportGraph asks it
+        // for the chain rather than walking the state machine a second time.
+        private static IReadOnlyDictionary<string, CodeGen.Domain.Twin.ProcessGraph> Graphs(TwinModel twin) =>
+            twin.Processes.ToDictionary(p => p.Name,
+                p => CodeGen.Domain.Twin.ProcessGraph.Build(p.Source), StringComparer.OrdinalIgnoreCase);
 
         private static ReportGraph Build(params VueOneComponent[] components)
         {
             var twin = TwinModel.Build(components);
             return ReportGraph.Build(twin, Allocation(twin),
-                RigCatalog.Current.CrossRingSegment, Array.Empty<string>());
+                RigCatalog.Current.CrossRingSegment, Array.Empty<string>(), Graphs(twin));
         }
 
         // Two roster rows on the feed target and two on the assembly target. Nothing here is a Feed or an
@@ -162,7 +177,7 @@ namespace MapperTests
             });
 
             var ex = Assert.Throws<InvalidOperationException>(() => ReportGraph.Build(
-                twin, Allocation(twin), Array.Empty<string>(), Array.Empty<string>()));
+                twin, Allocation(twin), Array.Empty<string>(), Array.Empty<string>(), Graphs(twin)));
 
             Assert.Contains("[Transport]", ex.Message, StringComparison.Ordinal);
             Assert.Contains(OnFeed, ex.Message, StringComparison.Ordinal);
