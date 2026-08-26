@@ -21,10 +21,10 @@ namespace CodeGen.Translation
 
             foreach (var g in declared.GroupBy(c => c.Plc).Where(g => g.Count() > 1))
                 errors.Add($"telemetry.yml declares {g.Count()} connections for target '{g.Key}'");
-            foreach (var c in declared.Where(c => !TargetRegistry.IsRegistered(c.Plc)))
+            foreach (var c in declared.Where(c => !ctx.Targets.IsRegistered(c.Plc)))
                 errors.Add($"telemetry.yml declares a connection for '{c.Plc}', which no backend implements");
 
-            foreach (var target in TargetRegistry.All.Where(t => ctx.Emits(t.Plc)))
+            foreach (var target in ctx.Targets.All.Where(t => ctx.Emits(t.Plc)))
             {
                 var connection = declared.FirstOrDefault(c => c.Plc == target.Plc);
                 if (connection == null)
@@ -69,6 +69,6 @@ namespace CodeGen.Translation
                 .Select(c => (c.Name ?? string.Empty).Trim())
                 .Where(n => n.Length > 0 && ctx.Allocation.Of(n) == plc)
                 .Any(n => ctx.CatTypes.TryGetValue(n, out var cat) &&
-                          TemplateManifest.Find(cat)?.Telemetry != null);
+                          ctx.Manifest.Find(cat)?.Telemetry != null);
     }
 }
