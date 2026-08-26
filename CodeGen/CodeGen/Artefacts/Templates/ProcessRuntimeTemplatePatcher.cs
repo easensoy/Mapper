@@ -100,7 +100,7 @@ namespace CodeGen.Services
                         st.ReplaceAll(new System.Xml.Linq.XCData(kept));
                     }
 
-                    if (cfg.Paths.MqttPublishEnabled)
+                    if (cfg.Telemetry.PublishEnabled)
                     {
                         inputs?.Add(new System.Xml.Linq.XElement(ns + "VarDeclaration",
                             new System.Xml.Linq.XAttribute("Name", "ProcessStateByRow"),
@@ -162,7 +162,7 @@ namespace CodeGen.Services
                     }
 
                     doc.Save(fbtPath);
-                    result.PatchesApplied.Add(cfg.Paths.MqttPublishEnabled
+                    result.PatchesApplied.Add(cfg.Telemetry.PublishEnabled
                         ? $"{Path.GetFileName(fbtPath)}: process telemetry state added (ProcessStateByRow[{size}]{(isEngine ? " + CurrentProcessState" : "")})"
                         : $"{Path.GetFileName(fbtPath)}: process telemetry state stripped (MQTT publishing off)");
                 }
