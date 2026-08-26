@@ -95,7 +95,7 @@ namespace MapperTests
         }
 
         private static GenerationContext Compile(IReadOnlyList<VueOneComponent> plant) =>
-            GenerationContext.Plan(new MapperConfig(), plant, DeploymentProfile.M262Only(LayoutCatalog.Load()));
+            GenerationContext.Plan(TestConfig.Cfg, plant, DeploymentProfile.AsPlaced(TestConfig.Cfg));
 
         // ---- the renaming ----------------------------------------------------------------------------
 
