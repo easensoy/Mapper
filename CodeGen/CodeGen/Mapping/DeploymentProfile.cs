@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Configuration;
+using CodeGen.Translation;
 
 namespace CodeGen.Mapping
 {
@@ -25,16 +26,19 @@ namespace CodeGen.Mapping
         // The instance running a task handshake rather than a stop sequence, if any.
         string TaskArmInstance,
         // Instances whose arrival the plant declares un-sensed, with the acknowledge time.
-        IReadOnlyDictionary<string, int> TimerAcknowledged)
+        IReadOnlyDictionary<string, int> TimerAcknowledged,
+        // What a cross-process reference means where the recipe cannot simply wait for the phase.
+        HandoffPolicy Handoff)
     {
         public bool TakesRingScopedSlot(string? name) =>
             RingScopedSlotReporters.Any(r => string.Equals(r, (name ?? string.Empty).Trim(),
                 StringComparison.OrdinalIgnoreCase));
 
-        // Read from the declarative plant profile, which is where a deployment states these.
-        public static PlantFacts Declared()
+        // Read from the declarative plant profile, which is where a deployment states these. The
+        // catalog is handed in: a profile built from one snapshot and facts read from another would
+        // be two configurations inside one run.
+        public static PlantFacts Declared(RigCatalog c)
         {
-            var c = RigCatalog.Current;
             return new PlantFacts(
                 c.ComponentIdCeiling,
                 c.Roles.TopCoverSensor,
@@ -44,10 +48,18 @@ namespace CodeGen.Mapping
                 c.SynthSensors.Select(s => s.Name).ToList(),
                 c.Roles.TaskArm,
                 c.FeedbackModes.Where(f => f.IsTimerAcknowledged)
-                    .ToDictionary(f => f.Component, f => f.AckMs, StringComparer.OrdinalIgnoreCase));
+                    .ToDictionary(f => f.Component, f => f.AckMs, StringComparer.OrdinalIgnoreCase),
+                c.Handoff);
         }
     }
 
+    // The deployment inputs for THIS run: the catalog saying where every component runs and is drawn,
+    // the plant's own declarations, and the ASSIGNMENTS this run makes - components the operator moved
+    // off the target layout.yml places them on.
+    //
+    // An assignment is generic: a component name and the target it runs on. Nothing here knows which
+    // controller that is, so moving a component to a target that exists is a roster decision and
+    // nothing in the compiler changes.
     public sealed class DeploymentProfile
     {
         public LayoutCatalog Layout { get; }
@@ -56,40 +68,79 @@ namespace CodeGen.Mapping
         // reachability; which instance fills a role, and which components a carrier already spans,
         // are declarations of THIS deployment, so they enter the compiler through the profile.
         public PlantFacts Facts { get; }
-        public IReadOnlySet<string> RevPiComponents { get; }
 
-        public DeploymentProfile(IEnumerable<string> revPiComponents, LayoutCatalog layout)
-            : this(revPiComponents, layout, PlantFacts.Declared())
+        // Component -> the target it runs on, for components this run moved off their layout row.
+        public IReadOnlyDictionary<string, PlcAssignment> Assignments { get; }
+
+        // Built FROM the run's declarations: the layout it places against and the plant facts it
+        // compiles against come from one snapshot, so they cannot describe two different rigs.
+        // facts overrides what the rig catalog declares, for a plant that states its own - a synthetic
+        // one built in code, for instance. Left null it is the declared profile, which is the rig.
+        public DeploymentProfile(IReadOnlyDictionary<string, PlcAssignment> assignments,
+            Configuration.CompilerConfiguration cfg, PlantFacts? facts = null)
         {
+            if (cfg == null) throw new ArgumentNullException(nameof(cfg));
+            var devices = cfg.Devices;
+            Layout = cfg.Layout;
+            Facts = facts ?? PlantFacts.Declared(cfg.Rig);
+
+            var placed = new Dictionary<string, PlcAssignment>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in assignments ?? new Dictionary<string, PlcAssignment>())
+            {
+                if (!TargetRegistry.IsRegistered(kv.Value))
+                    throw new ArgumentException(
+                        $"[Deployment] '{kv.Key}' is assigned to {kv.Value}, which no backend implements.",
+                        nameof(assignments));
+                placed[kv.Key] = kv.Value;
+            }
+            // A target may declare components its own hardware is the only reader of; hosting anything
+            // there takes them along. That is the TARGET's hardware contract, declared in device.yml.
+            foreach (var target in placed.Values.Distinct().ToList())
+                foreach (var required in devices.AlwaysHostedBy(target))
+                    placed[required] = target;
+            Assignments = placed;
         }
 
-        public DeploymentProfile(IEnumerable<string> revPiComponents, LayoutCatalog layout,
-            PlantFacts facts)
+        // Every component keeps its layout row: nothing is moved.
+        public static DeploymentProfile AsPlaced(Configuration.CompilerConfiguration cfg,
+            PlantFacts? facts = null) =>
+            new(new Dictionary<string, PlcAssignment>(), cfg, facts);
+
+        // THE BOUNDARY ADAPTER. MapperUI and the prebuilt VueOne runner send a SET of component names
+        // bound for the one target that exists to receive components moved off another - that is the
+        // shape their binary contract has always had. It becomes generic assignments here, once, so
+        // nothing inside the compiler works in terms of a particular controller.
+        public static DeploymentProfile Relocating(
+            IEnumerable<string>? names, Configuration.CompilerConfiguration cfg, PlantFacts? facts = null)
         {
-            Layout = layout ?? throw new ArgumentNullException(nameof(layout));
-            Facts = facts ?? throw new ArgumentNullException(nameof(facts));
-            var selected = new HashSet<string>(
-                revPiComponents ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-            // device.yml declares which components the RevPi coupler is the only reader of; hosting
-            // anything there takes them along. A hardware contract of the target, not a name known here.
-            if (selected.Count > 0)
-                foreach (var required in DeviceConfig.Current.RevPi.AlwaysHosts)
-                    selected.Add(required);
-            RevPiComponents = selected;
+            var target = TargetRegistry.All.FirstOrDefault(t => t.ReceivesRelocatedComponents)?.Plc;
+            var map = new Dictionary<string, PlcAssignment>(StringComparer.OrdinalIgnoreCase);
+            if (target != null)
+                foreach (var name in names ?? Array.Empty<string>()) map[name] = target.Value;
+            return new DeploymentProfile(map, cfg, facts);
         }
 
-        public static DeploymentProfile M262Only(LayoutCatalog layout) =>
-            new(Array.Empty<string>(), layout);
+        // Whether this run moved anything at all.
+        public bool HasAssignments => Assignments.Count > 0;
 
-        // Some Feed components on the RevPi, the M262 keeping the rest.
-        public bool PartialRevPi => RevPiComponents.Count > 0;
+        // The same question under the name the HMI module compiles against. That module is owned by a
+        // separate session, so its vocabulary is kept here rather than edited from this side; it is one
+        // expression forwarding to the one above, not a second answer.
+        public bool PartialRevPi => HasAssignments;
 
-        public bool RunsOnRevPi(string? componentName) =>
-            !string.IsNullOrEmpty(componentName) && RevPiComponents.Contains(componentName!);
+        // The target this run runs a component on, or null where its layout row stands.
+        public PlcAssignment? AssignedTarget(string? componentName) =>
+            componentName != null && Assignments.TryGetValue(componentName.Trim(), out var plc)
+                ? plc : null;
+
+        // Whether this run assigns anything to a target - which is what makes a target that exists
+        // only to receive relocated components part of this run.
+        public bool AssignsAnythingTo(PlcAssignment plc) => Assignments.Values.Contains(plc);
 
         public override string ToString() =>
-            PartialRevPi
-                ? "RevPi:" + string.Join(",", RevPiComponents.OrderBy(n => n, StringComparer.Ordinal))
-                : "M262";
+            HasAssignments
+                ? string.Join(",", Assignments.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                    .Select(kv => $"{kv.Key}->{kv.Value}"))
+                : "as placed";
     }
 }
