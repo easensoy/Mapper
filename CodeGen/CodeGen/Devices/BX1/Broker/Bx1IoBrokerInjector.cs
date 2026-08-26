@@ -13,44 +13,47 @@ namespace CodeGen.Devices.BX1
     {
         static readonly XNamespace Ns = CodeGen.Devices.Core.Station2DeviceEmitter.LibElNs;
 
-        public const string BrokerFbId = "F6C04A4BA6FA8593";
+        public static string BrokerFbId =>
+            Configuration.DeviceConfig.Identity(CodeGen.Translation.PlcAssignment.Named("BX1")).IoBrokerFb;
         public const string BrokerFbName = "BX1_IO";
         public const string BrokerFbType = "PLC_RW_BX1";
 
         // Derived from the one arity->hash table rather than restated: a second copy of an EAE type name
         // is a second thing to keep right.
         const string ScanFbName = "BX1_IO_Cycle";
-        const string ScanPeriod = "T#50ms";
+        static string ScanPeriod(Configuration.CompilerConfiguration cfg) =>
+            Configuration.GenerationConfig.Duration(cfg.Generation.Bx1IoScanPeriodMs);
 
         // The coupler word as the rig wired it, from Config/device.yml: no plant name or bit number lives here.
-        static Configuration.Bx1IoProfile Io => Configuration.DeviceConfig.Current.Bx1Io;
+        static Configuration.Bx1IoProfile Io(Configuration.CompilerConfiguration cfg) => cfg.Devices.Bx1Io;
 
         // Init-root cover: the LAST on the profile's chain, so every cover ahead of it has initialised first.
-        static string InitRootCover => Io.Covers[^1].Component;
+        static string InitRootCover(Configuration.CompilerConfiguration cfg) => Io(cfg).Covers[^1].Component;
 
         static (string Cover, string? SensorFromHome, string? SensorFromWork,
-                string Event, string? CoilToHome, string? CoilToWork)[] Covers =>
-            Io.Covers.Select(c => (c.Component, c.SensorFromHome?.Signal, c.SensorFromWork?.Signal,
+                string Event, string? CoilToHome, string? CoilToWork)[] Covers(
+            Configuration.CompilerConfiguration cfg) =>
+            Io(cfg).Covers.Select(c => (c.Component, c.SensorFromHome?.Signal, c.SensorFromWork?.Signal,
                                    c.Event, c.CoilToHome?.Signal, c.CoilToWork?.Signal)).ToArray();
 
         // symlink name -> word bit. The cover-present bit is published under EVERY top-cover spelling the profile
         // lists: the broker is a shared TYPE and cannot know which one a twin uses; an unsubscribed SRC is inert.
-        static (string Sym, int Bit)[] CoverSensors =>
-            Io.Covers
+        static (string Sym, int Bit)[] CoverSensors(Configuration.CompilerConfiguration cfg) =>
+            Io(cfg).Covers
                 .SelectMany(c => new[]
                 {
                     c.SensorFromHome == null ? default : ($"{c.Component}.athome", c.SensorFromHome.Bit),
                     c.SensorFromWork == null ? default : ($"{c.Component}.atwork", c.SensorFromWork.Bit),
                 })
                 .Where(t => t.Item1 != null)
-                .Concat(Io.Covers
+                .Concat(Io(cfg).Covers
                     .Where(c => c.SensorFromWork != null && c.SensorFromHome == null)
-                    .SelectMany(c => Configuration.RigCatalog.Current.Roles.TopCoverSensor
+                    .SelectMany(c => cfg.Rig.Roles.TopCoverSensor
                         .Select(n => ($"{n}.Input", c.SensorFromWork!.Bit))))
                 .ToArray();
 
-        static (string Sym, int Bit)[] CoverCoils =>
-            Io.Covers
+        static (string Sym, int Bit)[] CoverCoils(Configuration.CompilerConfiguration cfg) =>
+            Io(cfg).Covers
                 .SelectMany(c => new[]
                 {
                     c.CoilToWork == null ? default : ($"{c.Component}.OutputToWork", c.CoilToWork.Bit),
@@ -61,7 +64,8 @@ namespace CodeGen.Devices.BX1
 
         // Transforms the deployed PLC_RW_BX1.fbt into the internalized broker (CoverSensorPublisher +
         // CoverCoilSubscriber + ScanCycle); new FBs must be inserted BEFORE Input/Output/connections. Idempotent.
-        public static void EmbedCoverBridgeInComposite(string fbtPath, string resourceName = "BX1_RES")
+        public static void EmbedCoverBridgeInComposite(Configuration.CompilerConfiguration cfg,
+            string fbtPath, string resourceName = "BX1_RES")
         {
             if (!File.Exists(fbtPath)) return;
             // No PreserveWhitespace: Save re-indents so every FB lands on its own line (EAE requires it).
@@ -104,7 +108,7 @@ namespace CodeGen.Devices.BX1
                     new XAttribute("ID", nextId++), new XAttribute("UID", uid++),
                     new XAttribute("Name", name), new XAttribute("Type", type),
                     new XAttribute("x", x.ToString()), new XAttribute("y", y.ToString()),
-                    new XAttribute("Namespace", "Main"),
+                    new XAttribute("Namespace", Configuration.GenerationConfig.Namespace),
                     new XElement("Attribute",
                         new XAttribute("Name", "Configuration.GenericFBType.InterfaceParams"),
                         new XAttribute("Value", Iface(arity))),
@@ -119,19 +123,19 @@ namespace CodeGen.Devices.BX1
             void Da(string s, string d) => dc.Add(new XElement("Connection",
                 new XAttribute("Source", s), new XAttribute("Destination", d)));
 
-            var (sArity, sType) = Pick("SRC", CoverSensors.Length);
+            var (sArity, sType) = Pick("SRC", CoverSensors(cfg).Length);
             var sNames = new string[sArity];
             for (int i = 0; i < sArity; i++)
-                sNames[i] = i < CoverSensors.Length
-                    ? $"{resourceName}.{CoverSensors[i].Sym}"
+                sNames[i] = i < CoverSensors(cfg).Length
+                    ? $"{resourceName}.{CoverSensors(cfg)[i].Sym}"
                     : $"{resourceName}.{BrokerFbName}.CoverSensorSpare{i + 1}";
             AddFb("CoverSensorPublisher", sType, sArity, sNames, 3000, 700);
 
-            var (cArity, cType) = Pick("DST", CoverCoils.Length);
+            var (cArity, cType) = Pick("DST", CoverCoils(cfg).Length);
             var cNames = new string[cArity];
             for (int i = 0; i < cArity; i++)
-                cNames[i] = i < CoverCoils.Length
-                    ? $"{resourceName}.{CoverCoils[i].Sym}"
+                cNames[i] = i < CoverCoils(cfg).Length
+                    ? $"{resourceName}.{CoverCoils(cfg)[i].Sym}"
                     : $"{resourceName}.{BrokerFbName}.CoverCoilSpare{i + 1}";
             AddFb("CoverCoilSubscriber", cType, cArity, cNames, 5000, 700);
 
@@ -141,7 +145,7 @@ namespace CodeGen.Devices.BX1
                 new XAttribute("ID", nextId++), new XAttribute("Name", "ScanCycle"),
                 new XAttribute("Type", "E_DELAY"), new XAttribute("x", "700"),
                 new XAttribute("y", "1400"), new XAttribute("Namespace", "IEC61499.Standard"),
-                new XElement("Parameter", new XAttribute("Name", "DT"), new XAttribute("Value", ScanPeriod)));
+                new XElement("Parameter", new XAttribute("Name", "DT"), new XAttribute("Value", ScanPeriod(cfg))));
             if (firstInput != null) firstInput.AddBeforeSelf(scan); else net.Add(scan);
 
             Ev("INIT", "CoverSensorPublisher.INIT");
@@ -153,13 +157,13 @@ namespace CodeGen.Devices.BX1
             Ev("EIPInputs_Bool.CNF", "CoverSensorPublisher.REQ");
             Ev("CoverCoilSubscriber.CNF", "EIPOutput_Bits.REQ");
 
-            for (int i = 0; i < CoverSensors.Length; i++)
-                Da($"EIPInputs_Bool.bit{CoverSensors[i].Bit}", $"CoverSensorPublisher.VALUE{i + 1}");
-            for (int i = 0; i < CoverCoils.Length; i++)
-                Da($"CoverCoilSubscriber.VALUE{i + 1}", $"EIPOutput_Bits.bit{CoverCoils[i].Bit}");
+            for (int i = 0; i < CoverSensors(cfg).Length; i++)
+                Da($"EIPInputs_Bool.bit{CoverSensors(cfg)[i].Bit}", $"CoverSensorPublisher.VALUE{i + 1}");
+            for (int i = 0; i < CoverCoils(cfg).Length; i++)
+                Da($"CoverCoilSubscriber.VALUE{i + 1}", $"EIPOutput_Bits.bit{CoverCoils(cfg)[i].Bit}");
 
             // Remove the superseded cover-InputVar -> BitsToWord connections: two data sources per bit is an EAE error.
-            var inputVarSources = Io.Covers
+            var inputVarSources = Io(cfg).Covers
                 .SelectMany(c => new[] { c.CoilToWork?.Signal, c.CoilToHome?.Signal })
                 .Where(s => !string.IsNullOrWhiteSpace(s))
                 .ToArray();
@@ -226,7 +230,7 @@ namespace CodeGen.Devices.BX1
                 new XAttribute("ID", nextId++), new XAttribute("Name", "CoverFailsafe"),
                 new XAttribute("Type", "Bx1CoverFailsafe"),
                 new XAttribute("x", "4600"), new XAttribute("y", "1300"),
-                new XAttribute("Namespace", "Main"));
+                new XAttribute("Namespace", Configuration.GenerationConfig.Namespace));
             var firstInput = net.Elements("Input").FirstOrDefault();
             if (firstInput != null) firstInput.AddBeforeSelf(fb); else net.Add(fb);
 
@@ -292,14 +296,14 @@ namespace CodeGen.Devices.BX1
         }
 
         // Injects the BX1_IO broker + cover symlink bridge into the BX1 SubApp (syslay) and sysres; returns files touched.
-        public static int InjectBx1IoBroker(MapperConfig cfg, string syslayPath,
+        public static int InjectBx1IoBroker(Configuration.CompilerConfiguration cfg, string syslayPath,
             SystemInjector.BindingApplicationReport report)
         {
             int touched = 0;
             try
             {
                 var bx1Sysres = FindBx1Sysres(cfg, syslayPath);
-                var resourceName = ReadResourceName(bx1Sysres) ?? CodeGen.Mapping.ControllerMap.ResourceForPlc(PlcAssignment.BX1);
+                var resourceName = ReadResourceName(bx1Sysres) ?? CodeGen.Mapping.TargetRegistry.Of(PlcAssignment.Named("BX1")).ResourceName;
                 foreach (var (label, path, isSysres) in new[]
                 {
                     ("syslay", syslayPath,        false),
@@ -309,7 +313,7 @@ namespace CodeGen.Devices.BX1
                     if (string.IsNullOrEmpty(path) || !File.Exists(path)) continue;
                     try
                     {
-                        if (InjectInto(path, isSysres, label, resourceName, report)) touched++;
+                        if (InjectInto(cfg, path, isSysres, label, resourceName, report)) touched++;
                     }
                     catch (IOException)
                     {
@@ -333,16 +337,16 @@ namespace CodeGen.Devices.BX1
             return touched;
         }
 
-        static bool InjectInto(string path, bool isSysres, string label, string resourceName,
-            SystemInjector.BindingApplicationReport report)
+        static bool InjectInto(Configuration.CompilerConfiguration cfg, string path, bool isSysres,
+            string label, string resourceName, SystemInjector.BindingApplicationReport report)
         {
             var doc = XDocument.Load(path, LoadOptions.PreserveWhitespace);
-            var net = FindCoverNetwork(doc);
+            var net = FindCoverNetwork(cfg, doc);
             if (net == null) return false;
             var fileTag = isSysres ? "sysres" : "syslay";
 
             bool hasGripper = net.Elements(Ns + "FB")
-                .Any(f => (string?)f.Attribute("Name") == InitRootCover);
+                .Any(f => (string?)f.Attribute("Name") == InitRootCover(cfg));
 
             var ec = net.Element(Ns + "EventConnections") ?? AddSection(net, "EventConnections");
             var dc = net.Element(Ns + "DataConnections")  ?? AddSection(net, "DataConnections");
@@ -350,7 +354,7 @@ namespace CodeGen.Devices.BX1
             // The broker FB (forced id so the copied .hcf matches).
             AddBrokerFbIfAbsent(net, isSysres, isSysres ? 9500 : 32000, 5800);
             if (hasGripper)
-                AddEvent(ec, $"{InitRootCover}.INITO", $"{BrokerFbName}.INIT");
+                AddEvent(ec, $"{InitRootCover(cfg)}.INITO", $"{BrokerFbName}.INIT");
 
             // The bridge lives INSIDE PLC_RW_BX1, so the resource carries only BX1_IO. An older deploy put
             // the bridge at resource level, so any such FB is swept here and the tree converges.
@@ -371,7 +375,7 @@ namespace CodeGen.Devices.BX1
                 // A composite has no path to a sibling instance's event input, so the ONE wire that must stay at
                 // resource level is the top-cover re-sample trigger; without it a cover in place at power-on is never reported.
                 var tcFb = net.Elements(Ns + "FB").FirstOrDefault(f =>
-                    (string?)f.Attribute("Type") == "Sensor_Bool_CAT" &&
+                    (string?)f.Attribute("Type") == CodeGen.Mapping.TemplateManifest.SensorType.Name &&
                     ((string?)f.Attribute("Name") ?? "").ToLowerInvariant().Contains("cover"));
                 if (tcFb != null)
                     AddEvent(ec, $"{BrokerFbName}.CoverSensorEvent",
@@ -392,7 +396,7 @@ namespace CodeGen.Devices.BX1
             if (net.Elements(Ns + "FB").Any(f => (string?)f.Attribute("Name") == BrokerFbName)) return;
             var fb = new XElement(Ns + "FB",
                 new XAttribute("ID", BrokerFbId), new XAttribute("Name", BrokerFbName),
-                new XAttribute("Type", BrokerFbType), new XAttribute("Namespace", "Main"));
+                new XAttribute("Type", BrokerFbType), new XAttribute("Namespace", Configuration.GenerationConfig.Namespace));
             if (isSysres) fb.Add(new XAttribute("Mapping", BrokerFbId));
             fb.Add(new XAttribute("x", x.ToString()), new XAttribute("y", y.ToString()));
 
@@ -410,7 +414,7 @@ namespace CodeGen.Devices.BX1
             ec.Add(new XElement(Ns + "Connection", new XAttribute("Source", src), new XAttribute("Destination", dst)));
         }
 
-        static XElement? FindCoverNetwork(XDocument doc)
+        static XElement? FindCoverNetwork(Configuration.CompilerConfiguration cfg, XDocument doc)
         {
             foreach (var net in doc.Descendants(Ns + "FBNetwork")
                          .Concat(doc.Descendants(Ns + "SubAppNetwork")))
@@ -418,7 +422,7 @@ namespace CodeGen.Devices.BX1
                 if (net.Elements(Ns + "FB").Any(f =>
                 {
                     var n = (string?)f.Attribute("Name") ?? string.Empty;
-                    return Io.Covers.Any(c => string.Equals(c.Component, n, StringComparison.Ordinal));
+                    return Io(cfg).Covers.Any(c => string.Equals(c.Component, n, StringComparison.Ordinal));
                 }))
                     return net;
             }
@@ -454,11 +458,11 @@ namespace CodeGen.Devices.BX1
             catch { return null; }
         }
 
-        static string? FindBx1Sysres(MapperConfig cfg, string syslayPath)
+        static string? FindBx1Sysres(Configuration.CompilerConfiguration cfg, string syslayPath)
         {
             string? systemDir = null;
             foreach (var seed in new[] { Path.GetDirectoryName(syslayPath),
-                                         Path.GetDirectoryName(cfg.SysresPath2) })
+                                         Path.GetDirectoryName(cfg.Paths.SysresPath2) })
             {
                 var probe = seed;
                 while (!string.IsNullOrEmpty(probe))
@@ -476,7 +480,7 @@ namespace CodeGen.Devices.BX1
                 try
                 {
                     var head = File.ReadAllText(sysres);
-                    if (Io.Covers.Any(c => head.Contains(c.Component, StringComparison.Ordinal)))
+                    if (Io(cfg).Covers.Any(c => head.Contains(c.Component, StringComparison.Ordinal)))
                         return sysres;
                 }
                 catch { /* ignore unreadable */ }
