@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.IO;
@@ -37,6 +37,10 @@ namespace CodeGen.Configuration
             new("Config", "security.yml") { OnLoaded = Validate };
 
         public static SecurityProfile Current => File.Load();
+
+        /// The same declaration read from a run's OWN profile bundle. A root of null is the
+        /// bundle shipped beside CodeGen.dll, which is what a normal run reads.
+        public static SecurityProfile LoadFrom(string? root) => File.Load(root);
 
         // Refuses by NAMING THE FIELD, never by quoting its value: a diagnostic that echoed a hash
         // would put the credential in every log that captured the failure.
