@@ -17,6 +17,22 @@ namespace CodeGen.Translation
 
     public static class PortNameValidator
     {
+        // Proves every port templates.yml declares exists in the archive that ships the type. Run BEFORE
+        // the project is cleaned, so a declaration that has drifted from its archive stops the run with
+        // a diagnostic rather than emitting a wire to a port that is not there - which EAE rejects the
+        // whole resource for, after the previous project has already been wiped.
+        public static void AssertContractMatchesArchives(string templateLibraryPath)
+        {
+            var mismatches = Validate(templateLibraryPath)
+                .Where(m => m.ExpectedPort.Length > 0).ToList();
+            if (mismatches.Count == 0) return;
+            throw new InvalidOperationException(
+                $"[Template] {mismatches.Count} port(s) templates.yml declares are not in the archive " +
+                "that ships the type: " +
+                string.Join("; ", mismatches.Select(m => $"{m.FbType}.{m.ExpectedPort}")) +
+                ". The declaration and the shipped FBT have drifted apart.");
+        }
+
         public static List<PortNameMismatch> Validate(string templateLibraryPath)
         {
             var mismatches = new List<PortNameMismatch>();
