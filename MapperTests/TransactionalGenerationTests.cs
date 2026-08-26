@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -116,6 +116,41 @@ namespace MapperTests
             // The previous tree was copied in, so copy-if-absent and preserve-existing behave as they
             // would against the live project.
             Assert.Equal("<SystemConfiguration>previous</SystemConfiguration>", File.ReadAllText(staged));
+        }
+
+        [Fact]
+        public void An_output_that_already_holds_artefacts_but_no_project_file_is_refused()
+        {
+            // "No project root derivable" and "no project there" are different states, and the second
+            // is the only one where writing without a staging copy is free. A tree whose .dfbproj is
+            // missing, renamed or unreadable is still somebody's work: staging cannot be placed beside
+            // a root that cannot be derived, so the run must stop rather than overwrite it in place.
+            File.Delete(Path.Combine(_live, "Demonstrator", "IEC61499", "IEC61499.dfbproj"));
+            var before = Fingerprint(_live);
+
+            var boom = Assert.Throws<InvalidOperationException>(() => ProjectTransaction.Begin(Config(), _ => { }));
+            Assert.Contains("is already an emitted artefact", boom.Message);
+
+            Assert.Equal(before, Fingerprint(_live));      // and nothing was touched saying so
+        }
+
+        [Fact]
+        public void A_first_generation_into_an_empty_output_needs_no_staging()
+        {
+            // The other side of the same rule: with nothing there, all-or-nothing is vacuous, and
+            // demanding a sibling would make the very first generation impossible.
+            var empty = Path.Combine(_root, "fresh", "Demonstrator", "IEC61499", "System", "app");
+            Directory.CreateDirectory(empty);
+            var paths = TestConfig.Cfg.Paths.Clone();
+            paths.SyslayPath2 = Path.Combine(empty, "app.syslay");
+            paths.SysresPath2 = Path.Combine(empty, "app.sysres");
+            Directory.Delete(Path.Combine(_root, "fresh"), true);
+
+            var notes = new List<string>();
+            using var txn = ProjectTransaction.Begin(TestConfig.Cfg.With(paths), notes.Add);
+
+            Assert.Contains(notes, n => n.Contains("nothing to protect", StringComparison.Ordinal));
+            Assert.Equal(paths.SyslayPath2, txn.Configuration.Paths.SyslayPath2);   // written where told
         }
 
         [Fact]
