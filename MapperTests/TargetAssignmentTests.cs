@@ -92,13 +92,13 @@ namespace MapperTests
         {
             // What a target IS stays data; what it DOES is typed code. So the backend list is C# and
             // every registered backend answers for exactly one declared target.
-            Assert.NotEmpty(TargetRegistry.Backends);
-            foreach (var backend in TargetRegistry.Backends)
+            Assert.NotEmpty(TargetBackends.All);
+            foreach (var backend in TargetBackends.All)
             {
                 Assert.IsAssignableFrom<ITargetBackend>(backend);
                 Assert.True(TargetRegistry.IsRegistered(backend.Target));
             }
-            var targets = TargetRegistry.Backends.Select(b => b.Target).ToList();
+            var targets = TargetBackends.All.Select(b => b.Target).ToList();
             Assert.Equal(targets.Count, targets.Distinct().Count());
         }
 
@@ -117,7 +117,7 @@ namespace MapperTests
                          nameof(ITargetBackend.FinishApplication),
                          nameof(ITargetBackend.ValidateOutput),
                      })
-                foreach (var backend in TargetRegistry.Backends)
+                foreach (var backend in TargetBackends.All)
                     Assert.NotNull(backend.GetType().GetMethod(stage));
         }
 
