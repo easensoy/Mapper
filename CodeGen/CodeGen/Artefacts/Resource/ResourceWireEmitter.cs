@@ -23,11 +23,47 @@ namespace CodeGen.Devices.Core
             "E_RESTART",
         };
 
+        // Wires the resource this target runs on. One owner for every target: which sysres file that
+        // is comes from the target's declared device type, and what goes on it comes from the plan.
+        //
+        // The parameter sync runs BOTH sides of the wiring pass - before, so the wiring sees the FBs it
+        // is about to connect, and after, because rebuilding the FBNetwork would otherwise ship a stale
+        // recipe on a resource that deploys perfectly well.
+        public static void WireResource(GenerationContext ctx, PlcAssignment plc,
+            SystemInjector.BindingApplicationReport report)
+        {
+            var plan = ctx.ResourceFor(plc);
+            var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(ctx.Cfg);
+            if (eaeRoot == null)
+            {
+                report.Missing.Add($"[Wire][{plan.Label}] skipped, EAE project root not derivable");
+                return;
+            }
+            var sysdev = EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, TargetRegistry.Of(plc).DeviceType);
+            var sysres = sysdev == null ? null : EaeProjectLayout.FindSysresFor(sysdev);
+            if (sysres == null)
+            {
+                report.Missing.Add($"[Wire][{plan.Label}] skipped, its resource is not on disk");
+                return;
+            }
+
+            void Sync(string when)
+            {
+                var n = SysresFbMirror.SyncMirroredFbParametersFromSyslay(ctx.Config.ActiveSyslayPath, sysres);
+                if (n > 0)
+                    report.Missing.Add($"[Wire][{plan.Label}] {when}synced {n} mirrored FB parameter set(s)");
+            }
+
+            Sync(string.Empty);
+            EmitForResource(ctx, sysres, plan, report);
+            Sync("post-wire ");
+        }
+
         // Wires one deployed sysres FBNetwork, from the components the sysres actually carries.
         public static void EmitForResource(GenerationContext ctx, string sysresPath,
             ResourcePlan plan, SystemInjector.BindingApplicationReport report)
         {
-            var cfg = ctx.Config;
+            var cfg = ctx.Cfg;
             try
             {
                 var tag = plan.Label;
@@ -49,9 +85,9 @@ namespace CodeGen.Devices.Core
 
                 // This is the LAST writer of every sysres, so a relocated component left here is duplicated
                 // across two resources. See Docs/PATCH_RATIONALES P-6.
-                if (ctx.Profile.PartialRevPi && !plan.Capabilities.ReceivesRelocatedComponents)
+                if (ctx.Profile.HasAssignments && !plan.Capabilities.ReceivesRelocatedComponents)
                 {
-                    var relocated = ctx.Profile.RevPiComponents;
+                    var relocated = ctx.Profile.Assignments.Keys;
                     var dropFbs = fbNet.Elements(ns + "FB")
                         .Where(f => relocated.Contains((string?)f.Attribute("Name") ?? "")).ToList();
                     foreach (var fb in dropFbs) fb.Remove();
@@ -68,7 +104,7 @@ namespace CodeGen.Devices.Core
                 }
 
                 var recipeSyncCount = SysresFbMirror.SyncProcessRecipesFromSyslay(
-                    cfg.ActiveSyslayPath, doc);
+                    cfg.Paths.ActiveSyslayPath, doc);
                 if (recipeSyncCount > 0)
                     report.Missing.Add(
                         $"[Wire][{tag}] synced {recipeSyncCount} Process recipe(s) from syslay to sysres");
@@ -86,15 +122,6 @@ namespace CodeGen.Devices.Core
                 // M580/BX1 sysres canvases are device-local; M262 keeps raw coords (its FBs start at x=2000).
                 bool translateToOrigin = plan.Capabilities.DeviceLocalCanvas;
                 ApplyCanonicalLayout(ctx, byName, report, tag, translateToOrigin);
-
-                var portsByType = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
-                HashSet<string> PortsFor(string type)
-                {
-                    if (portsByType.TryGetValue(type, out var p)) return p;
-                    p = LoadFbtPorts(cfg.TemplateLibraryPath, type);
-                    portsByType[type] = p;
-                    return p;
-                }
 
                 var emittedEvents = new List<(string s, string d)>();
                 var emittedData = new List<(string s, string d)>();
@@ -137,187 +164,34 @@ namespace CodeGen.Devices.Core
                             report.Missing.Add($"[Wire] FB instance not found for {w.Source} → {w.Destination}");
                         return;
                     }
-                    if (!srcBuiltIn && !PortExists(PortsFor(srcType), srcPort))
-                    {
-                        report.Missing.Add($"[{tag}] port not found: {srcName}.{srcPort}, skipping wire");
-                        return;
-                    }
-                    if (!dstBuiltIn && !PortExists(PortsFor(dstType), dstPort))
-                    {
-                        report.Missing.Add($"[{tag}] port not found: {dstName}.{dstPort}, skipping wire");
-                        return;
-                    }
                     sink.Add(($"{srcName}.{srcPort}", $"{dstName}.{dstPort}"));
                     report.Missing.Add($"[{tag}] {srcName}.{srcPort} -> {dstName}.{dstPort}");
                 }
 
-                bool IsSensor(XElement fb) =>
-                    TemplateManifest.SensorTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
-                bool IsActuator(XElement fb) =>
-                    TemplateManifest.ActuatorTypes.Contains((string?)fb.Attribute("Type") ?? string.Empty);
-                bool HasStationAdapter(XElement fb) =>
-                    !TemplateMap.LacksStationAdapter((string?)fb.Attribute("Type"));
-                var orderedComps = new List<XElement>();
-                var seenComp = new HashSet<string>(StringComparer.Ordinal);
-                foreach (var nm in ctx.Roster.CaSBusOrder)
-                    if (byName.TryGetValue(nm, out var cfb) &&
-                        (IsSensor(cfb) || IsActuator(cfb)))
-                    {
-                        if (seenComp.Add(nm))
-                            orderedComps.Add(cfb);
-                    }
-                foreach (var fb in fbNet.Elements(ns + "FB"))
-                {
-                    var nm = (string?)fb.Attribute("Name") ?? string.Empty;
-                    if (nm.Length == 0 || (!IsSensor(fb) && !IsActuator(fb))) continue;
-                    if (seenComp.Add(nm))
-                        orderedComps.Add(fb);
-                }
-                string Nm(XElement fb) => (string?)fb.Attribute("Name") ?? string.Empty;
-                var initNames = orderedComps.Select(Nm).Where(s => s.Length > 0).ToList();
-                // Driven by the M262->M580 splice, so OFF the local Feed ring; on both it is double-driven.
-                var crossSegment = ctx.CrossRingSegment;
-                bool robotTail = crossSegment.Count > 0;
-                var ringNames = orderedComps.Select(Nm)
-                    .Where(s => s.Length > 0)
-                    .Where(s => !crossSegment.Contains(s, StringComparer.OrdinalIgnoreCase))
-                    // TopCoverSenosr stays ON the ring so its report reaches Assembly's state_table.
-                    .ToList();
-                var actNames = orderedComps.Where(c => IsActuator(c) && HasStationAdapter(c))
-                    .Select(Nm).Where(s => s.Length > 0).ToList();
-
-                var processNames = new List<string>();
-                foreach (var planned in plan.Processes)
-                    if (Present(planned, byName)) processNames.Add(planned);
-                foreach (var fb in fbNet.Elements(ns + "FB"))
-                {
-                    var nm = (string?)fb.Attribute("Name") ?? string.Empty;
-                    if (nm.Length == 0 || processNames.Contains(nm)) continue;
-                    if ((string?)fb.Attribute("Type") == "Process1_Generic")
-                        processNames.Add(nm);
-                }
-                bool haveProcess = processNames.Count > 0;
+                // The SAME graph the shared canvas was drawn from, projected into this resource's own
+                // order. Membership, seams and chain endpoints were decided there; presence is the only
+                // thing left to check here, because a wire to an FB the mirror did not create is a wire
+                // to nothing. See ChainOrder for why the two orders are not normalised into one.
+                var graph = ResourceWiringPlanner.For(ctx, plan.Plc, ChainOrder.Resource);
+                bool Here(string? name) => Present(name, byName);
 
                 var eventWires = TargetBootstrap.BringUp.Select(w => new Wire(w.Source, w.Destination)).ToList();
-                var initChain = new List<string> { TargetBootstrap.InitRole };
-                if (Present(plan.AreaFb, byName)) initChain.Add(plan.AreaFb!);
-                if (Present(plan.StationFb, byName)) initChain.Add(plan.StationFb!);
-                // Members another controller commands init LAST, so their bring-up cannot block this process.
-                var robotTailInit = new HashSet<string>(ctx.Rings.DischargeTail, StringComparer.Ordinal);
-                initChain.AddRange(initNames.Where(n => !robotTailInit.Contains(n)));
-                initChain.AddRange(processNames);
-                initChain.AddRange(initNames.Where(n => robotTailInit.Contains(n)));
+                var initChain = graph.InitChain.Where(Here).ToList();
                 for (int i = 0; i < initChain.Count - 1; i++)
                     eventWires.Add(new Wire($"{initChain[i]}.INITO", $"{initChain[i + 1]}.INIT"));
 
-                // EAE runs the sysres event graph, not the syslay, so MqttConn bring-up must be re-emitted
-                // here or the broker never opens. Matched by TYPE: each resource has its own.
-                foreach (var mqttKv in byName)
-                {
-                    var mqttType = (string?)mqttKv.Value.Attribute("Type");
-                    if (!string.Equals(mqttType, "MQTT_CONNECTION", StringComparison.Ordinal) &&
-                        !string.Equals(mqttType, "Telemetry", StringComparison.Ordinal))
-                        continue;
-                    var mqttName = mqttKv.Key;
-                    var mqttInit = Present(plan.AreaFb, byName) ? plan.AreaFb!
-                                 : Present(plan.StationFb, byName) ? plan.StationFb!
-                                 : TargetBootstrap.InitRole;
-                    eventWires.Add(new Wire($"{mqttInit}.INITO", $"{mqttName}.INIT"));
-                    eventWires.Add(new Wire($"{mqttName}.INITO", $"{mqttName}.CONNECT"));
-                }
+                // EAE runs the sysres event graph, not the syslay, so the connection's bring-up must be
+                // re-emitted here or the broker never opens.
+                foreach (var (source, destination) in graph.ConnectionLinks)
+                    eventWires.Add(new Wire(source, destination));
 
-                var adapterWires = plan.AdapterRelations.Select(r => new Wire(r.Source, r.Destination)).ToList();
+                foreach (var seam in graph.OpenSeams) report.Missing.Add($"[{tag}] {seam}");
 
-                // Needs a Station and a Process anchor, so BX1 skips it and reaches the ring only.
-                var chain = plan.StationChain;
-                bool haveStation = chain != null && Present(plan.StationFb, byName);
-                if (haveStation && haveProcess)
-                {
-                    var stationChain = new List<string>(actNames);
-                    stationChain.AddRange(processNames);
-                    adapterWires.Add(new Wire(chain!.Value.From, $"{stationChain[0]}.stationAdptr_in"));
-                    for (int i = 0; i < stationChain.Count - 1; i++)
-                        adapterWires.Add(new Wire($"{stationChain[i]}.stationAdptr_out",
-                            $"{stationChain[i + 1]}.stationAdptr_in"));
-                    if (Present(plan.TerminatorFb, byName))
-                        adapterWires.Add(new Wire($"{stationChain[^1]}.stationAdptr_out", chain.Value.To));
-                }
-                else
-                {
-                    report.Missing.Add(
-                        $"[{tag}] no Station/Process FB on this resource, " +
-                        "skipping CaS station chain (init fan-out + report ring still wired)");
-                }
-
-                // Report ring. Process1_Generic uses the *Adptr port suffix; CATs use stateRprtCmd_*.
-                if (ringNames.Count > 0)
-                {
-                    for (int i = 0; i < ringNames.Count - 1; i++)
-                        adapterWires.Add(new Wire($"{ringNames[i]}.stateRprtCmd_out",
-                            $"{ringNames[i + 1]}.stateRprtCmd_in"));
-                    if (haveProcess)
-                    {
-                        // Cover detour (M580): omit the local close, else the boundary plug is double-driven.
-                        bool openCoverSeam = plan.Capabilities.OpensCoverSeam;
-                        if (openCoverSeam)
-                            report.Missing.Add(
-                                $"[{tag}] cover detour: left {ringNames[^1]}.stateRprtCmd_out OPEN " +
-                                $"(crosses to BX1 covers) and {processNames[0]}.stateRptCmdAdptr_in OPEN " +
-                                "(arrives from BX1 CoverPnp_Gripper) — EAE bridges via syslay");
-                        else
-                            adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
-                                $"{processNames[0]}.stateRptCmdAdptr_in"));
-                        for (int i = 0; i < processNames.Count - 1; i++)
-                            adapterWires.Add(new Wire($"{processNames[i]}.stateRptCmdAdptr_out",
-                                $"{processNames[i + 1]}.stateRptCmdAdptr_in"));
-                        // Cross-controller seam: same boundary-open rule.
-                        bool openBoundary =
-                            (robotTail && plan.Capabilities.OpensCoverSeam) ||
-                            (ctx.Rings.RingsMerged && plan.Capabilities.HostsFeedRing);
-                        if (openBoundary)
-                            report.Missing.Add(
-                                $"[{tag}] cross-PLC ring: left {processNames[^1]}.stateRptCmdAdptr_out OPEN " +
-                                $"and {ringNames[0]}.stateRprtCmd_in fed via seam — EAE bridges via syslay cross-hops");
-                        else
-                            adapterWires.Add(new Wire($"{processNames[^1]}.stateRptCmdAdptr_out",
-                                $"{ringNames[0]}.stateRprtCmd_in"));
-                    }
-                    else if (ringNames.Count > 1)
-                    {
-                        // A chain commanded by another controller's ring is OPEN at both ends.
-                        bool openCoverChain = plan.Capabilities.CarriesDetouredChain;
-                        if (openCoverChain)
-                            report.Missing.Add(
-                                $"[{tag}] cover detour: cover chain {ringNames[0]}…{ringNames[^1]} ends OPEN " +
-                                "(in from M580 Clamp, out to M580 Assembly) — EAE bridges via syslay");
-                        else
-                            adapterWires.Add(new Wire($"{ringNames[^1]}.stateRprtCmd_out",
-                                $"{ringNames[0]}.stateRprtCmd_in"));
-                    }
-                }
-
-                // M262 cross-ring segment: kept OFF the Feed ring, both ends left OPEN for EAE to bridge.
-                var crossSeg = crossSegment
-                    .Where(byName.ContainsKey).ToList();
-                for (int i = 0; i < crossSeg.Count - 1; i++)
-                    adapterWires.Add(new Wire(
-                        $"{crossSeg[i]}.stateRprtCmd_out", $"{crossSeg[i + 1]}.stateRprtCmd_in"));
-                if (crossSeg.Count > 0)
-                {
-                    if (ctx.Rings.RingsMerged && ringNames.Count > 0 && plan.Capabilities.HostsFeedRing)
-                    {
-                        // Merged-ring seam (M262): the segment tail feeds the Feed head locally.
-                        adapterWires.Add(new Wire(
-                            $"{crossSeg[^1]}.stateRprtCmd_out", $"{ringNames[0]}.stateRprtCmd_in"));
-                        report.Missing.Add(
-                            $"[{tag}] merged-ring seam: {crossSeg[^1]}.stateRprtCmd_out -> {ringNames[0]} " +
-                            "(Feed head, local); seg[0].in + Feed_Station.out OPEN — EAE bridges via syslay");
-                    }
-                    else
-                        report.Missing.Add(
-                            $"[{tag}] M262 cross-ring segment {string.Join("->", crossSeg)}: ends OPEN " +
-                            "(seg[0].in from M580 Disassembly, seg[^1].out to M580 BearingSensor) — EAE bridges via syslay");
-                }
+                var adapterWires = graph.AdapterRelations
+                    .Concat(graph.StationLinks)
+                    .Concat(graph.RingLinks)
+                    .Concat(graph.SegmentLinks)
+                    .Select(r => new Wire(r.Source, r.Destination)).ToList();
 
                 foreach (var w in eventWires)   Process(w, emittedEvents,   "event");
                 foreach (var w in adapterWires) Process(w, emittedAdapters, "adapter");
@@ -465,14 +339,16 @@ namespace CodeGen.Devices.Core
             }
         }
 
-        // Membership uses BucketFor, the same partition as the FB mirror. Keys MUST match the frame Names.
-        private static readonly Dictionary<string, PlcAssignment> FrameBucket = new(StringComparer.Ordinal)
-        {
-            { "FRAME_Station1",      PlcAssignment.M262 },
-            { "FRAME_Station2_M580", PlcAssignment.M580 },
-            { "FRAME_BX1",           PlcAssignment.BX1  },
-        };
 
+        // A target that RECEIVES relocated components draws no zone of its own: the components came from
+        // another target's station and are drawn inside that station's frame, which is the target hosting
+        // the same station without receiving anything.
+        private static PlcAssignment FrameOwner(PlcAssignment bucket)
+        {
+            return TargetRegistry.IsRegistered(bucket)
+                ? RingHost.Of(TargetRegistry.Of(bucket))
+                : bucket;
+        }
 
         private static void ResizeFramesToFitFbs(GenerationContext ctx, XElement net, XNamespace ns,
             SystemInjector.BindingApplicationReport report)
@@ -494,13 +370,13 @@ namespace CodeGen.Devices.Core
             foreach (var frame in net.Elements(ns + "Frame").ToList())
             {
                 var fname = (string?)frame.Attribute("Name") ?? string.Empty;
-                if (!FrameBucket.TryGetValue(fname, out var bucket)) continue;
+                // Which target a frame belongs to is layout.yml's, declared beside the frame itself.
+                var owner = ctx.Layout.Bands.FirstOrDefault(b =>
+                    string.Equals(b.Frame?.Name, fname, StringComparison.Ordinal));
+                if (owner == null) continue;
+                // Membership uses BucketFor, the same partition as the FB mirror.
                 var inZone = fbs.Where(f =>
-                {
-                    var b = SysresFbMirror.BucketFor(f.Name, ctx.Allocation);
-                    if (b == PlcAssignment.RevPi) b = PlcAssignment.M262;
-                    return b == bucket;
-                }).ToList();
+                    FrameOwner(SysresFbMirror.BucketFor(f.Name, ctx.Allocation, ctx.Cfg)) == owner.Plc).ToList();
                 if (inZone.Count == 0) continue;
 
                 double minX = inZone.Min(f => f.X);
@@ -519,44 +395,10 @@ namespace CodeGen.Devices.Core
                 frame.SetAttributeValue("Width", fw.ToString(inv));
                 frame.SetAttributeValue("Height", fh.ToString(inv));
                 report.Missing.Add(
-                    $"[Layout] frame {fname} ({bucket}) -> X={fx:0} Y={fy:0} W={fw:0} H={fh:0} " +
+                    $"[Layout] frame {fname} ({owner.Plc}) -> X={fx:0} Y={fy:0} W={fw:0} H={fh:0} " +
                     $"encloses {inZone.Count} FB(s)");
             }
         }
 
-        private static bool PortExists(HashSet<string> ports, string portName)
-            => ports.Count == 0 /* unknown FB type — be lenient */ || ports.Contains(portName);
-
-        // Empty when the type is not found; the caller reads that as "skip validation".
-        private static HashSet<string> LoadFbtPorts(string libRoot, string typeName)
-        {
-            var set = new HashSet<string>(StringComparer.Ordinal);
-            if (string.IsNullOrWhiteSpace(libRoot) || !Directory.Exists(libRoot)) return set;
-            string? fbtPath = null;
-            foreach (var sub in new[] { "Basic", "Composite", "Adapter", "CAT" })
-            {
-                var probe = Path.Combine(libRoot, sub, typeName, "IEC61499", typeName + ".fbt");
-                if (File.Exists(probe)) { fbtPath = probe; break; }
-            }
-            if (fbtPath == null)
-            {
-                foreach (var f in Directory.EnumerateFiles(libRoot, typeName + ".fbt", SearchOption.AllDirectories))
-                { fbtPath = f; break; }
-            }
-            if (fbtPath == null) return set;
-            try
-            {
-                var doc = XDocument.Load(fbtPath);
-                var iface = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "InterfaceList");
-                if (iface == null) return set;
-                foreach (var port in iface.Descendants())
-                {
-                    var n = (string?)port.Attribute("Name");
-                    if (!string.IsNullOrEmpty(n)) set.Add(n);
-                }
-            }
-            catch { /* leave set empty */ }
-            return set;
-        }
     }
 }
