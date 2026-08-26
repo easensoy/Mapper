@@ -73,7 +73,7 @@ namespace CodeGen.Services
         // publishes nothing, so idle ring traffic stays zero. NOT applied to the centre-home swivel (see
         // StripCatHomeSensorPoll) nor to Sensor_Bool_CAT, which re-reads through its RD event.
         internal static void EnsureFiveStateInputPoll(FbtEditScope scope, int pollMs, DeployResult result)
-            => EditDeployedFbt(scope, CodeGen.Mapping.TemplateManifest.FbtOf("fiveStateCat"),
+            => EditDeployedFbt(scope, scope.Manifest.FbtOf("fiveStateCat"),
                 "Five_State_Actuator_CAT input poll inject failed", result,
                 (doc, root, ns, fbt) =>
             {
