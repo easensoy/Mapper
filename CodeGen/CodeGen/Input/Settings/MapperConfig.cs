@@ -79,6 +79,15 @@ namespace CodeGen.Configuration
 
         public string BX1HcfTemplatePath { get; set; } = string.Empty;
 
+        // The authored hardware configs this machine holds, by file name. WHICH file a target uses is
+        // device.yml's answer; where it lives is this local config's, so the two meet by name and
+        // nothing has to ask for a controller by name to find one.
+        public System.Collections.Generic.IReadOnlyDictionary<string, string> HcfTemplatesByFileName =>
+            new[] { M262HcfTemplatePath, M580HcfTemplatePath, BX1HcfTemplatePath }
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .ToDictionary(p => System.IO.Path.GetFileName(p) ?? string.Empty, p => p,
+                              StringComparer.OrdinalIgnoreCase);
+
         // Every MQTT setting is READ-ONLY here and owned by Config/telemetry.yml. They stay on MapperConfig
         // because the prebuilt VueOne runner links them, but having no setter is what stops a stale
         // mapper_config.json shadowing the broker or client identity. mqtt:// vs mqtts:// is derived from
