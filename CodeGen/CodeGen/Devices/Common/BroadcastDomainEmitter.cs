@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 using CodeGen.Configuration;
+using CodeGen.Services;
 
 namespace CodeGen.Devices.Core
 {
@@ -16,7 +17,22 @@ namespace CodeGen.Devices.Core
             public System.Collections.Generic.List<string> Warnings { get; } = new();
         }
 
-        public static EmitResult Emit(MapperConfig cfg)
+        // One document, rendered twice: the default network, and any domain an Equipment references
+        // that nothing declares. They differ only in which subnet they carry, so a second copy of the
+        // body could only drift from this one.
+        private static string Domain(Configuration.CompilerConfiguration cfg, string uuid, string identifier,
+            string subnetAddress, string subnetMask, string gateway) =>
+            TemplateDocument.Load(cfg, @"Topology\BroadcastDomain.json",
+                new System.Collections.Generic.Dictionary<string, string>
+                {
+                    ["Uuid"] = uuid,
+                    ["Identifier"] = identifier,
+                    ["SubnetAddress"] = subnetAddress,
+                    ["SubnetMask"] = subnetMask,
+                    ["Gateway"] = gateway,
+                });
+
+        public static EmitResult Emit(Configuration.CompilerConfiguration cfg)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
             var result = new EmitResult();
@@ -34,23 +50,16 @@ namespace CodeGen.Devices.Core
             }
 
             var path = Path.Combine(topologyDir, "BroadcastDomain_Default Network.json");
-            var json = $$"""
-            {
-              "uuid": "{{cfg.DefaultNetworkUuid}}",
-              "identifier": "Default Network",
-              "ipV4Address": "{{cfg.DefaultNetworkSubnetAddress}}",
-              "ipV4Mask": "{{cfg.DefaultNetworkSubnetMask}}",
-              "ipV4Gateway": "{{cfg.DefaultNetworkGateway}}"
-            }
-            """;
-            File.WriteAllText(path, json);
+            File.WriteAllText(path, Domain(cfg,
+                cfg.Paths.DefaultNetworkUuid, "Default Network",
+                cfg.Paths.DefaultNetworkSubnetAddress, cfg.Paths.DefaultNetworkSubnetMask, cfg.Paths.DefaultNetworkGateway));
             result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, path));
             return result;
         }
 
         // An Equipment referencing a domain UUID that no BroadcastDomain_*.json declares fails EAE's
         // topology import. Only writes BroadcastDomain JSON; never touches Equipment or device state.
-        public static EmitResult EnsureReferencedDomains(MapperConfig cfg)
+        public static EmitResult EnsureReferencedDomains(Configuration.CompilerConfiguration cfg)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
             var result = new EmitResult();
@@ -91,7 +100,7 @@ namespace CodeGen.Devices.Core
 
             // Undefined domains are the ones the dPACs reference, so they take the M262 rig
             // subnet, not DefaultNetwork.
-            var dev = DeviceConfig.Current.M262;
+            var dev = cfg.Devices.M262;
             int n = 1;
             foreach (var uuid in referenced)
             {
@@ -101,16 +110,8 @@ namespace CodeGen.Devices.Core
                 while (File.Exists(Path.Combine(topologyDir, $"BroadcastDomain_{name}.json")));
 
                 var path = Path.Combine(topologyDir, $"BroadcastDomain_{name}.json");
-                var json = $$"""
-                {
-                  "uuid": "{{uuid}}",
-                  "identifier": "{{name}}",
-                  "ipV4Address": "{{dev.SubnetAddress}}",
-                  "ipV4Mask": "{{dev.SubnetMask}}",
-                  "ipV4Gateway": "{{dev.Gateway}}"
-                }
-                """;
-                File.WriteAllText(path, json);
+                File.WriteAllText(path, Domain(cfg,
+                    uuid, name, dev.SubnetAddress, dev.SubnetMask, dev.Gateway));
                 result.FilesWritten.Add(Path.GetRelativePath(eaeRoot, path));
 
                 // Some EAE import paths honour only REGISTERED topology items.
@@ -128,7 +129,8 @@ namespace CodeGen.Devices.Core
                 result.Warnings.Add(
                     $"Created + registered missing BroadcastDomain '{name}' (uuid {uuid}) — an " +
                     $"Equipment referenced it but no file declared it (dangling domain → topology " +
-                    $"import failure). Pinned to 192.168.1.0/24.");
+                    $"import failure). On {dev.SubnetAddress}/{dev.SubnetMask}, the subnet the " +
+                    "referencing device declares.");
             }
 
             // EAE's Archive packs only files REGISTERED in TopologyManager.topologyproj, so an unregistered
