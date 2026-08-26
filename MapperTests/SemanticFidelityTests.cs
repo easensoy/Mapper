@@ -418,7 +418,7 @@ namespace MapperTests
         [Fact]
         public void A_process_the_roster_places_on_any_target_is_planned_onto_that_resource()
         {
-            foreach (var t in TargetRegistry.All) PlaceAProcessOn(t.Plc);
+            foreach (var t in TestConfig.Cfg.Targets.All) PlaceAProcessOn(t.Plc);
         }
 
         private static void PlaceAProcessOn(PlcAssignment target)
@@ -426,8 +426,8 @@ namespace MapperTests
             // A roster row is DATA. Placing a process on a different target must not need a C# branch, so
             // the same plant is compiled four times and only the row moves. A target that exists only
             // when work is RELOCATED onto it is reached that way, which is how production reaches it.
-            bool relocated = TargetRegistry.Of(target).ReceivesRelocatedComponents;
-            var rostered = relocated ? TargetRegistry.FeedTarget : target;
+            bool relocated = TestConfig.Cfg.Targets.Of(target).ReceivesRelocatedComponents;
+            var rostered = relocated ? TestConfig.Cfg.Targets.FeedTarget : target;
             var layout = FreshLayout();
             layout.Components.Add(new RosterEntry
             { Name = "Kiln_Line", Plc = rostered, Column = 9, Row = "Process" });
