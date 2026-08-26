@@ -178,7 +178,7 @@ public API instead.**
 ## R-8. `Test Runtime` without a prior `Station2SysresMirror.EmitStation2Sysres` call
 
 **Tried (multiple times, recurring until 2026-05-29):** the `btnTestStation1_Click`
-hardware-path handler ran `Station2WireEmitter.EmitStation2Resources` without
+hardware-path handler ran `Station2WireEmitter.EmitStation2Resources` (today: the resource-wire stage on each target backend) without
 first re-mirroring the Station-2 FBs onto the M580 sysres.
 
 **Why it seemed right:** the FBs are already there from the prior deploy;
@@ -193,7 +193,7 @@ forgotten.
 
 **What works instead:** `Test Runtime` calls
 `Station2SysresMirror.EmitStation2Sysres` **before**
-`Station2WireEmitter.EmitStation2Resources`. Landed 2026-05-29 in
+`Station2WireEmitter.EmitStation2Resources` (today: the resource-wire stage on each target backend). Landed 2026-05-29 in
 `MainForm.cs:~830` region. **Do not remove that call without finding a
 different way to re-sync sysres FB types per deploy.**
 
