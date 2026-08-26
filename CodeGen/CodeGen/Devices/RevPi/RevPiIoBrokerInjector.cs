@@ -66,7 +66,7 @@ namespace CodeGen.Devices.RevPi
 
         // Called by the deployer once the pristine coupler type is in place, so the resource holds only the broker.
         public static void EmbedBridgeInComposite(string fbtPath) =>
-            EmbedBridge(Current, ControllerMap.ResourceForPlc(PlcAssignment.RevPi), fbtPath);
+            EmbedBridge(Current, TargetRegistry.Of(PlcAssignment.Named("RevPi")).ResourceName, fbtPath);
 
         static Coupler? _current;
         internal static Coupler Current => _current ??= Resolve(MapperConfig.Load().TemplateLibraryPath);
@@ -215,10 +215,10 @@ namespace CodeGen.Devices.RevPi
             var events = Section(net, N("EventConnections"));
             Sweep(net, N, owned, events, Section(net, N("DataConnections")));
 
-            var band = layout.Band(PlcAssignment.RevPi);
+            var band = layout.Band(PlcAssignment.Named("RevPi"));
             var fb = new XElement(N("FB"),
                 new XAttribute("ID", coupler.BrokerFbId), new XAttribute("Name", BrokerName),
-                new XAttribute("Type", BrokerType), new XAttribute("Namespace", "Main"));
+                new XAttribute("Type", BrokerType), new XAttribute("Namespace", Configuration.GenerationConfig.Namespace));
             if (isResource) fb.Add(new XAttribute("Mapping", coupler.BrokerFbId));
             fb.Add(new XAttribute("x", (band.ColumnBaseX + layout.Geometry.ColumnPitchX * hosted.Count).ToString()),
                    new XAttribute("y", layout.RowY("Actuator").ToString()));
