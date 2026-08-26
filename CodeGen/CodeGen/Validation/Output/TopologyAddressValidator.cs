@@ -93,8 +93,8 @@ namespace CodeGen.Validation.Output
             bool revPiSelected = profile.HasAssignments;
             if (!revPiSelected) yield break;
 
-            string host = cfg.Paths.RevPiHostIp ?? string.Empty;
-            string target = cfg.Paths.RevPiTargetIp ?? string.Empty;
+            string host = cfg.Devices.RevPi.HostIp ?? string.Empty;
+            string target = cfg.Devices.RevPi.TargetIp ?? string.Empty;
 
             foreach (var (label, value) in new[] { ("hostIp", host), ("targetIp", target) })
             {
