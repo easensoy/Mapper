@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using CodeGen.Configuration;
@@ -46,9 +46,25 @@ namespace CodeGen.Application
 
             if (string.IsNullOrWhiteSpace(liveRoot))
             {
-                // Nothing to protect and nothing to derive a sibling from. The run writes where it was
-                // told to; there is no previous project a failure could cost.
-                log("[Txn] no existing project root was derivable — writing in place.");
+                // No .dfbproj was found above the configured syslay, so there is no EAE project here.
+                // That is the FIRST generation into an empty output, where all-or-nothing is vacuous:
+                // nothing exists that a failure could cost.
+                //
+                // But "no root derivable" and "no project there" are NOT the same thing, and treating
+                // them alike is how the guarantee quietly stops holding: a tree that already has
+                // artefacts in it but whose .dfbproj is missing, renamed or unreadable would take this
+                // branch and be written over in place. So an output that already holds SOMETHING is
+                // refused rather than staged into nothing.
+                var occupied = Occupied(cfg);
+                if (occupied != null)
+                    throw new InvalidOperationException(
+                        $"[Txn] '{occupied}' is already an emitted artefact, but no .dfbproj could be " +
+                        "found above the configured syslay, so the project root cannot be derived and a " +
+                        "staging sibling cannot be placed beside it. Generating in place would overwrite " +
+                        "that tree with no way back. Restore or name the project file, or point the " +
+                        "output at an empty directory.");
+
+                log("[Txn] no existing project — writing in place (nothing to protect).");
                 return new ProjectTransaction(cfg, null, string.Empty, log);
             }
 
@@ -80,6 +96,19 @@ namespace CodeGen.Application
             paths.SyslayPath2 = Restage(paths.SyslayPath2, liveRoot!, stagingRoot);
             paths.SysresPath2 = Restage(paths.SysresPath2, liveRoot!, stagingRoot);
             return new ProjectTransaction(cfg.With(paths), liveRoot, stagingRoot, log);
+        }
+
+        // Whether an artefact ALREADY SITS AT THE CONFIGURED OUTPUT PATH. Asked of the exact two files
+        // the run is about to write rather than of the surrounding directory: the output can live
+        // anywhere, beside anything, and "some file exists somewhere above it" would refuse perfectly
+        // ordinary first generations. A syslay or sysres already at the configured path, with no
+        // .dfbproj found above it, is the one state that is neither a fresh output nor a derivable
+        // project - and writing in place there would overwrite emitted work with no way back.
+        static string? Occupied(CompilerConfiguration cfg)
+        {
+            foreach (var path in new[] { cfg.Paths.ActiveSyslayPath, cfg.Paths.SysresPath2 })
+                if (!string.IsNullOrWhiteSpace(path) && File.Exists(path)) return path;
+            return null;
         }
 
         /// Replaces the live project with the staged one and returns the caller's path, mapped back to
