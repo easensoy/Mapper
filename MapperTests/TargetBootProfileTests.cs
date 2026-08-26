@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Configuration;
 using CodeGen.Mapping;
@@ -37,8 +37,8 @@ namespace MapperTests
         {
             Assert.Empty(Errors(new[]
             {
-                Target(PlcAssignment.M262, ("FB1", "0123456789ABCDEF"), ("FB2", "FEDCBA9876543210")),
-                Target(PlcAssignment.M580, ("FB1", "1111111111111111"), ("FB2", "2222222222222222")),
+                Target(PlcAssignment.Named("M262"), ("FB1", "0123456789ABCDEF"), ("FB2", "FEDCBA9876543210")),
+                Target(PlcAssignment.Named("M580"), ("FB1", "1111111111111111"), ("FB2", "2222222222222222")),
             }));
         }
 
@@ -47,7 +47,7 @@ namespace MapperTests
         {
             var errors = Errors(new[]
             {
-                Target(PlcAssignment.M262, ("FB1", "0123456789ABCDEF"), ("FB9", "FEDCBA9876543210")),
+                Target(PlcAssignment.Named("M262"), ("FB1", "0123456789ABCDEF"), ("FB9", "FEDCBA9876543210")),
             });
             Assert.Contains(errors, e => e.Contains("FB2") && e.Contains("exactly one"));
         }
@@ -55,7 +55,7 @@ namespace MapperTests
         [Fact]
         public void A_target_that_declares_the_wrong_number_of_boot_fbs_is_refused()
         {
-            var errors = Errors(new[] { Target(PlcAssignment.BX1, ("FB1", "0123456789ABCDEF")) });
+            var errors = Errors(new[] { Target(PlcAssignment.Named("BX1"), ("FB1", "0123456789ABCDEF")) });
             Assert.Contains(errors, e => e.Contains("declares 1 bootFbs") && e.Contains("2 role(s)"));
         }
 
@@ -64,8 +64,8 @@ namespace MapperTests
         {
             var errors = Errors(new[]
             {
-                Target(PlcAssignment.M262, ("FB1", "0123456789ABCDEF"), ("FB2", "FEDCBA9876543210")),
-                Target(PlcAssignment.RevPi, ("FB1", "0123456789ABCDEF"), ("FB2", "2222222222222222")),
+                Target(PlcAssignment.Named("M262"), ("FB1", "0123456789ABCDEF"), ("FB2", "FEDCBA9876543210")),
+                Target(PlcAssignment.Named("RevPi"), ("FB1", "0123456789ABCDEF"), ("FB2", "2222222222222222")),
             });
             Assert.Contains(errors, e => e.Contains("0123456789ABCDEF") && e.Contains("M262") &&
                                          e.Contains("RevPi"));
@@ -79,14 +79,14 @@ namespace MapperTests
         [InlineData("0123456789ABCDEZ")]    // not hex
         public void A_malformed_id_is_refused(string id)
         {
-            var errors = Errors(new[] { Target(PlcAssignment.M580, ("FB1", id), ("FB2", "2222222222222222")) });
+            var errors = Errors(new[] { Target(PlcAssignment.Named("M580"), ("FB1", id), ("FB2", "2222222222222222")) });
             Assert.Contains(errors, e => e.Contains("not a 16-character upper-case hex"));
         }
 
         [Fact]
         public void A_sequence_with_no_roles_is_refused_rather_than_booting_nothing()
         {
-            var errors = Errors(new[] { Target(PlcAssignment.M262) }, new List<BootFbDeclaration>());
+            var errors = Errors(new[] { Target(PlcAssignment.Named("M262")) }, new List<BootFbDeclaration>());
             Assert.Contains(errors, e => e.Contains("no bootSequence"));
         }
 
@@ -97,7 +97,7 @@ namespace MapperTests
             sequence[1].LayoutKey = string.Empty;
             var errors = Errors(new[]
             {
-                Target(PlcAssignment.M262, ("FB1", "0123456789ABCDEF"), ("FB2", "FEDCBA9876543210")),
+                Target(PlcAssignment.Named("M262"), ("FB1", "0123456789ABCDEF"), ("FB2", "FEDCBA9876543210")),
             }, sequence);
             Assert.Contains(errors, e => e.Contains("FB2") && e.Contains("layoutKey"));
         }
