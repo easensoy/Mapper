@@ -8,6 +8,7 @@ using CodeGen.Translation;
 using CodeGen.Mapping;
 using System.Xml.Linq;
 using CodeGen.Configuration;
+using CodeGen.Services;
 
 namespace CodeGen.Devices.RevPi
 {
@@ -19,17 +20,21 @@ namespace CodeGen.Devices.RevPi
     public static class RevPiDeviceEmitter
     {
         // Continues the M262/M580/BX1 (…002/003/004) series. Also named in Devices/Common/FoldersXmlEmitter.cs.
-        internal const string SysdevId = "00000000-0000-0000-0000-000000000005";
-        static readonly string DeviceName = TargetRegistry.Of(CodeGen.Translation.PlcAssignment.RevPi).DeviceName!;
+        static Configuration.DeviceIdentity RevPiId =>
+            Configuration.DeviceConfig.Identity(CodeGen.Translation.PlcAssignment.Named("RevPi"));
+
+        internal static string SysdevId => RevPiId.Sysdev;
+        static readonly string DeviceName = TargetRegistry.Of(CodeGen.Translation.PlcAssignment.Named("RevPi")).DeviceName!;
         const string EquipmentJsonName = "Equipment_Revolution_Pi.json";
         // Topology uuids. NicUuid is also named in TopologyNetworkEmitter, which wires NIC_2[Port1] to the switch.
-        const string EquipmentUuid = "11111111-2222-3333-4444-000000000050";
-        internal const string NicUuid = "11111111-2222-3333-4444-000000000051";
-        const string ContainerUuid = "11111111-2222-3333-4444-000000000052";
-        const string RuntimeUuid = "11111111-2222-3333-4444-000000000053";
-        // EAE schema constants: the Soft dPAC runtime type, and the broadcast domain both endpoints join.
-        const string SoftDpacTypeId = CodeGen.Devices.Core.Station2DeviceEmitter.SoftDpacTypeId;
-        const string DeviceNetworkUuid = CodeGen.Devices.Core.Station2DeviceEmitter.Bx1SoftdpacDomainUuid;
+        static string EquipmentUuid => RevPiId.Equipment;
+        internal static string NicUuid => RevPiId.Nic;
+        static string ContainerUuid => RevPiId.Container;
+        static string RuntimeUuid => RevPiId.Runtime;
+        // The Soft dPAC runtime type, and the broadcast domain both endpoints join - declared on this
+        // device's own row rather than borrowed from the BX1's, which happens to share both.
+        static string SoftDpacTypeId => RevPiId.RuntimeType;
+        static string DeviceNetworkUuid => RevPiId.ContainerDomain;
         const string NoDomainUuid = "00000000-0000-0000-0000-000000000000";
 
         // One supported profile: the Pi's primary NIC and the ARM Soft dPAC image (an x86 image exec-format-fails).
@@ -38,12 +43,11 @@ namespace CodeGen.Devices.RevPi
         const string SoftDpacImageVersion = "v24.1.25090.08";
 
         // Simulation-binding ports: every coexisting resource needs its own pair.
-        const int SimulationDeployPort = 51502, SimulationArchivePort = 51499;
 
         public static SystemInjector.BindingApplicationReport EmitDevice(GenerationContext ctx,
             SystemInjector.BindingApplicationReport report)
         {
-            var cfg = ctx.Config;
+            var cfg = ctx.Cfg;
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             var systemGuidDir = string.IsNullOrEmpty(eaeRoot) ? null : EaeProjectLayout.FindSystemGuidDir(eaeRoot);
             if (systemGuidDir == null)
@@ -54,28 +58,28 @@ namespace CodeGen.Devices.RevPi
             }
 
             // Throws with a precise reason BEFORE anything is written if coupler, workbook and hcf disagree.
-            var coupler = RevPiIoBrokerInjector.Resolve(cfg.TemplateLibraryPath);
+            var coupler = RevPiIoBrokerInjector.Resolve(cfg.Paths.TemplateLibraryPath);
             var hosted = HostedComponents(ctx, coupler);
 
             // A component instance may exist on exactly ONE resource; the same instance on two is EAE's
             // "Repair Instances" / duplicate-key load failure. Nothing here assumes which resource it leaves.
-            SweepFromOtherResources(systemGuidDir, hosted, report);
+            SweepFromOtherResources(cfg.Generation.FileWriteRetries, systemGuidDir, hosted, report);
 
             var solutionId = EaeProjectLayout.ReadProjectGuid(eaeRoot!) ?? NoDomainUuid;
             var shell = new Station2DeviceEmitter.EmitResult();
             Station2DeviceEmitter.EmitOnePlc(cfg, eaeRoot!, systemGuidDir, shell,
                 sysdevId: SysdevId,
                 deviceName: DeviceName,
-                deviceType: TargetRegistry.Of(CodeGen.Translation.PlcAssignment.RevPi).DeviceType,
+                deviceType: TargetRegistry.Of(CodeGen.Translation.PlcAssignment.Named("RevPi")).DeviceType,
                 resourceId: coupler.ResourceId,
                 resourceName: ResourceName,
                 hcfTemplatePath: HcfTemplatePath(cfg),
                 equipmentJsonName: EquipmentJsonName,
-                equipmentBuilder: () => EquipmentJson(solutionId, cfg.RevPiHostIp, cfg.RevPiTargetIp),
+                equipmentBuilder: () => EquipmentJson(cfg, solutionId, cfg.Paths.RevPiHostIp, cfg.Paths.RevPiTargetIp),
                 deployPluginPropertiesXml: Station2DeviceEmitter.BuildSoftDpacDeployPluginPropertiesXml(cfg,
-                    cfg.MqttPublishEnabled && !cfg.MqttSecureTls),
-                simulationBindingDeployPort: SimulationDeployPort,
-                simulationBindingArchivePort: SimulationArchivePort);
+                    cfg.Paths.MqttPublishEnabled && !cfg.Paths.MqttSecureTls),
+                simulationBindingDeployPort: TargetRegistry.Of(PlcAssignment.Named("RevPi")).SimulationDeployPort,
+                simulationBindingArchivePort: TargetRegistry.Of(PlcAssignment.Named("RevPi")).SimulationArchivePort);
             foreach (var w in shell.Warnings) report.Missing.Add($"[RevPi] {w}");
 
             // A missing hardware config is an EAE "Missing Project Files" report; EnsureHcf re-copies it.
@@ -84,14 +88,14 @@ namespace CodeGen.Devices.RevPi
 
             // Each resource needs its OWN boot pair: EAE indexes FBs by id in one global model, so a shared
             // boot id is a duplicate-key load failure. Seeding on the resource name keeps them unique.
-            var syslay = cfg.ActiveSyslayPath;
+            var syslay = cfg.Paths.ActiveSyslayPath;
             if (File.Exists(sysres) && !string.IsNullOrWhiteSpace(syslay) && File.Exists(syslay))
             {
                 var fbs = SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslay)
-                    .Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation) == PlcAssignment.RevPi)
+                    .Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation, ctx.Cfg) == PlcAssignment.Named("RevPi"))
                     .ToList();
                 int mirrored = SysresFbMirror.MirrorFbsIntoSysres(sysres, fbs,
-                    TargetBootstrap.For(PlcAssignment.RevPi, ctx.Layout));
+                    TargetBootstrap.For(PlcAssignment.Named("RevPi"), ctx.Layout));
                 report.Missing.Add($"[RevPi] device emitted; resource mirrored {mirrored} component(s)");
                 // EAE fails to LOAD a resource whose {resId}/opcua.xml companion folder is absent, and SysresFbMirror does not create it.
                 CodeGen.Artefacts.OpcuaCompanionEmitter.EmitForArtefact(sysres);
@@ -105,10 +109,10 @@ namespace CodeGen.Devices.RevPi
         public static void WireResource(GenerationContext ctx,
             SystemInjector.BindingApplicationReport report)
         {
-            var cfg = ctx.Config;
+            var cfg = ctx.Cfg;
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
             var systemGuidDir = string.IsNullOrEmpty(eaeRoot) ? null : EaeProjectLayout.FindSystemGuidDir(eaeRoot);
-            var coupler = RevPiIoBrokerInjector.Resolve(cfg.TemplateLibraryPath);
+            var coupler = RevPiIoBrokerInjector.Resolve(cfg.Paths.TemplateLibraryPath);
             var sysres = systemGuidDir == null ? null : SysresPath(systemGuidDir, coupler.ResourceId);
             if (sysres == null || !File.Exists(sysres))
             {
@@ -116,7 +120,7 @@ namespace CodeGen.Devices.RevPi
                 return;
             }
 
-            ResourceWireEmitter.EmitForResource(ctx, sysres, ctx.ResourceFor(PlcAssignment.RevPi), report);
+            ResourceWireEmitter.EmitForResource(ctx, sysres, ctx.ResourceFor(PlcAssignment.Named("RevPi")), report);
 
             var hosted = HostedComponents(ctx, coupler);
             var bootFb = ctx.Layout.BootFbs.Count > 0
@@ -125,7 +129,7 @@ namespace CodeGen.Devices.RevPi
             foreach (var (label, path, isResource) in new[]
                      {
                          ("resource", sysres, true),
-                         ("application", cfg.ActiveSyslayPath ?? string.Empty, false),
+                         ("application", cfg.Paths.ActiveSyslayPath ?? string.Empty, false),
                      })
             {
                 try
@@ -146,22 +150,22 @@ namespace CodeGen.Devices.RevPi
                     $"{coupler.Signals.Count} signal(s) for [{string.Join(", ", hosted)}].");
         }
 
-        static string ResourceName => Mapping.ControllerMap.ResourceForPlc(PlcAssignment.RevPi);
+        static string ResourceName => TargetRegistry.Of(PlcAssignment.Named("RevPi")).ResourceName;
 
         static string SysresPath(string systemGuidDir, string resourceId) =>
             Path.Combine(systemGuidDir, SysdevId, $"{resourceId}.sysres");
 
         // Its ResourceId and MB_Read/Write LinkNames are what the resource and the broker instance must satisfy.
-        static string HcfTemplatePath(MapperConfig cfg) =>
-            Path.Combine(cfg.TemplateLibraryPath ?? string.Empty, "RevPi", "RevPiIO.modbus.hcf");
+        static string HcfTemplatePath(Configuration.CompilerConfiguration cfg) =>
+            Path.Combine(cfg.Paths.TemplateLibraryPath ?? string.Empty, "RevPi", "RevPiIO.modbus.hcf");
 
         // In the coupler's own signal order, so the result is stable whatever order the operator picked.
         static IReadOnlyList<string> HostedComponents(GenerationContext ctx, RevPiIoBrokerInjector.Coupler c) =>
             c.Signals.Select(s => s.Component)
-                .Where(n => ctx.Profile.RevPiComponents.Contains(n))
+                .Where(n => ctx.Profile.Assignments.Keys.Contains(n))
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
-        static void EnsureHcf(MapperConfig cfg, string systemGuidDir, string resourceId,
+        static void EnsureHcf(Configuration.CompilerConfiguration cfg, string systemGuidDir, string resourceId,
             SystemInjector.BindingApplicationReport report)
         {
             var dest = Path.Combine(systemGuidDir, SysdevId, $"{SysdevId}.hcf");
@@ -169,13 +173,13 @@ namespace CodeGen.Devices.RevPi
             try
             {
                 File.Copy(HcfTemplatePath(cfg), dest, overwrite: true);
-                HcfRootRewriter.RewriteIfNeeded(dest, resourceId);
+                HcfRootRewriter.RewriteIfNeeded(dest, resourceId, cfg.Generation.FileWriteRetries);
                 report.Missing.Add("[RevPi] hardware config was missing — re-copied.");
             }
             catch (Exception ex) { report.Missing.Add($"[RevPi] hardware config copy error: {ex.Message}"); }
         }
 
-        static void SweepFromOtherResources(string systemGuidDir, IReadOnlyList<string> hosted,
+        static void SweepFromOtherResources(int retries, string systemGuidDir, IReadOnlyList<string> hosted,
             SystemInjector.BindingApplicationReport report)
         {
             if (hosted.Count == 0) return;
@@ -188,7 +192,7 @@ namespace CodeGen.Devices.RevPi
                     continue;
                 try
                 {
-                    var doc = CodeGen.Services.FbtXmlEditor.LoadXmlWithRetry(sysres, LoadOptions.PreserveWhitespace);
+                    var doc = CodeGen.Services.FbtXmlEditor.LoadXmlWithRetry(sysres, LoadOptions.PreserveWhitespace, retries);
                     var ns = doc.Root?.GetDefaultNamespace() ?? XNamespace.None;
                     var net = doc.Root?.Element(ns + "FBNetwork");
                     if (net == null) continue;
@@ -203,7 +207,7 @@ namespace CodeGen.Devices.RevPi
                                 ((string?)c.Attribute("Destination") ?? "").StartsWith(n + ".", StringComparison.Ordinal)))
                             .ToList().ForEach(c => c.Remove());
                     // EAE locks an open resource and a bare save fails silently, leaving the duplicate in place.
-                    CodeGen.Services.FbtXmlEditor.SaveXmlWithRetry(doc, sysres);
+                    CodeGen.Services.FbtXmlEditor.SaveXmlWithRetry(doc, sysres, retries);
                     report.Missing.Add($"[RevPi] swept {stale.Count} relocated component(s) off " +
                         $"'{Path.GetFileName(sysres)}' — prevents a duplicate instance.");
                 }
@@ -223,96 +227,24 @@ namespace CodeGen.Devices.RevPi
         // switch and EAE Deploy/Login see the container as its own endpoint. The Manager creates it, not us.
         // Host vs container is a ROLE split: the host NIC carries the Manager (8080) with an editable address,
         // the container's address is dictated by the vlan. They must never be equal (TopologyAddressValidator).
-        static string EquipmentJson(string solutionId, string hostIp, string containerIp) =>
-$$"""
-{
-  "catalogReference": "Workstation_V01.00_01.00",
-  "uuid": "{{EquipmentUuid}}",
-  "identifier": "{{DeviceName}}",
-  "path": "Topology",
-  "properties": [
-    { "propertyName": "IsUnderConstruction", "propertyValue": "False" },
-    { "propertyName": "CommCardReference",   "propertyValue": "" },
-    { "propertyName": "DomainTag",           "propertyValue": "{{solutionId}}" }
-  ],
-  "references": [
-    { "diagramPath": "Physical Views", "x": -564.27, "y": 61.87 }
-  ],
-  "equipments": [
-    {
-      "catalogReference": "NIC_EAE_V01.00_01.00",
-      "uuid": "{{NicUuid}}",
-      "identifier": "NIC_2",
-      "path": "{{DeviceName}}\\NIC_2",
-      "components": [
-        {
-          "interfaces": [
-            { "identifier": "{{HostInterface}}", "disabled": false, "physicalAddress": "",
-              "endpoints": [ { "identifier": "IP Address", "isReadOnly": false, "domainReadOnly": false,
-                               "ipAddress": "{{hostIp}}", "domain": "{{DeviceNetworkUuid}}" } ] }
-          ],
-          "ports": [ { "identifier": "Port1", "side": "Default" } ],
-          "componentType": "EthernetDEO"
-        }
-      ]
-    },
-    {
-      "catalogReference": "SoftdpacContainer_V01.00_01.00",
-      "uuid": "{{ContainerUuid}}",
-      "identifier": "Softdpac_3",
-      "path": "{{DeviceName}}\\Softdpac_3",
-      "components": [
-        {
-          "interfaces": [
-            { "identifier": "Eth0", "disabled": false, "physicalAddress": "",
-              "endpoints": [ { "identifier": "IP Address", "isReadOnly": false, "domainReadOnly": true,
-                               "ipAddress": "{{containerIp}}", "domain": "{{DeviceNetworkUuid}}" } ] }
-          ],
-          "ports": [ { "identifier": "Port0", "side": "Default" } ],
-          "componentType": "EthernetDEO"
-        },
-        { "endpoint": "Eth0\\IP Address", "connectionTypes": "None", "componentType": "EthernetMasterDEO" },
-        { "enabled": false, "securityMode": 0, "componentType": "SysLogClientDEO" },
-        {
-          "imageName": "{{SoftDpacImage}}", "imageVersion": "{{SoftDpacImageVersion}}",
-          "identifier": "DockerContainer", "allocatedRam": 524288, "cpuCores": [ 0, 1, 2, 3 ],
-          "componentType": "DockerContainerDEO"
-        },
-        {
-          "uuid": "{{RuntimeUuid}}", "typeId": "{{SoftDpacTypeId}}", "logicalDeviceId": "{{SysdevId}}",
-          "runtimeServices": [
-            { "identifier": "Deployment" },
-            { "identifier": "Archive Service", "logicalPortSecured": "0" }
-          ],
-          "componentType": "RuntimeDEO"
-        }
-      ]
-    }
-  ],
-  "components": [
-    { "mode": 0, "componentType": "CyberSecurityDEO" },
-    {
-      "preferredPrimary": false,
-      "dockerImages": [ { "identifier": "{{SoftDpacImage}}", "version": "" } ],
-      "dockerVlans": [
-        { "identifier": "softdpacDeviceNet", "type": 0, "domain": "{{DeviceNetworkUuid}}",
-          "interface": "NIC_2\\{{HostInterface}}", "domainReadOnly": false }
-      ],
-      "softdpacManagerServices": [
-        { "identifier": "Management services", "logicalPort": 8080, "endpoint": "" }
-      ],
-      "componentType": "SoftdpacManagerDEO"
-    },
-    {
-      "mode": 1,
-      "servers": [
-        { "name": "Primary NTP Server_1", "address": "0.0.0.0", "type": 0, "minPoll": 1, "maxPoll": 1 },
-        { "name": "Secondary NTP Server_1", "address": "0.0.0.0", "type": 1, "minPoll": 1, "maxPoll": 1 }
-      ],
-      "componentType": "TimeSettingsDEO"
-    }
-  ]
-}
-""";
+        static string EquipmentJson(Configuration.CompilerConfiguration cfg, string solutionId, string hostIp, string containerIp) =>
+            TemplateDocument.Load(cfg, @"Topology\Equipment_RevolutionPi.json",
+                new System.Collections.Generic.Dictionary<string, string>
+                {
+                    ["EquipmentUuid"] = EquipmentUuid,
+                    ["NicUuid"] = NicUuid,
+                    ["ContainerUuid"] = ContainerUuid,
+                    ["RuntimeUuid"] = RuntimeUuid,
+                    ["RuntimeTypeId"] = SoftDpacTypeId,
+                    ["SysdevId"] = SysdevId,
+                    ["DeviceNetwork"] = DeviceNetworkUuid,
+                    ["DeviceName"] = DeviceName,
+                    ["HostInterface"] = HostInterface,
+                    ["ContainerImage"] = SoftDpacImage,
+                    ["ContainerImageVersion"] = SoftDpacImageVersion,
+                    ["SolutionId"] = solutionId,
+                    ["HostIp"] = hostIp,
+                    ["ContainerIp"] = containerIp,
+                });
     }
 }
