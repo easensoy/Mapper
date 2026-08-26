@@ -6,8 +6,17 @@
   "controlPath": "{model}/Control.xml",
 
   "models": [
-    { "name": "SMC_Vue2VC_With_Processes_se" },
-    { "name": "SMC_Vue2VC_With_Processes_vc" },
+    // NEGATIVE FIXTURES. Both twins interlock Shaft_Hr/TurningWork on Bearing_PnP at two different
+    // stops inside ONE ConditionGroup. VueOne writes a group as a conjunction, so the rule can never
+    // fire and the actuator is guarded by nothing on that move. The compiler refuses rather than
+    // reinterpreting the AND, so the gate requires the refusal instead of a tree. Correct the twins
+    // (one ConditionGroup per Bearing_PnP condition) and remove expectRefusal to gate them normally.
+    { "name": "SMC_Vue2VC_With_Processes_se",
+      "expectRefusal": "UNSATISFIABLE INTERLOCK",
+      "refusalReason": "Shaft_Hr/TurningWork requires Bearing_PnP at Place AND AtPlace2 at once" },
+    { "name": "SMC_Vue2VC_With_Processes_vc",
+      "expectRefusal": "UNSATISFIABLE INTERLOCK",
+      "refusalReason": "Shaft_Hr/TurningWork requires Bearing_PnP at Place AND AtPlace2 at once" },
     { "name": "SMC_Vue2VC_With_Processes_sw5" },
     { "name": "SMC_Vue2VC_With_Processes_sw5_noclamp" }
   ],
