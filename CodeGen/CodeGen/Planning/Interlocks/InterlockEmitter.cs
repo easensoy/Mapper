@@ -14,21 +14,21 @@ namespace CodeGen.Translation.Interlocks
         public static IReadOnlyDictionary<string, InterlockPlan> PlanAll(
             IEnumerable<VueOneComponent> actuators, IReadOnlyDictionary<string, string> catTypes,
             IReadOnlyDictionary<string, int> scopedIds, Domain.Twin.TwinModel twin,
-            List<string> findings)
+            List<string> findings, Mapping.TemplateIndex manifest)
         {
             var plans = new Dictionary<string, InterlockPlan>(StringComparer.OrdinalIgnoreCase);
             foreach (var a in actuators)
             {
                 var name = (a.Name ?? string.Empty).Trim();
                 if (name.Length == 0 || plans.ContainsKey(name)) continue;
-                var plan = InterlockPlanner.BuildRules(a, scopedIds, catTypes, twin, findings);
+                var plan = InterlockPlanner.BuildRules(a, scopedIds, catTypes, twin, findings, manifest);
                 // Two CAT capabilities shape the rules, and each is DECLARED, never inferred from
                 // the CAT's name: a core that publishes a narrow raw-state range cannot match a
                 // rule outside it, and a CAT with a work stop either side of a centre reference
                 // crosses the shared volume both ways. Nothing synthetic is added here: a start
                 // gate belongs to the recipe.
                 var protocol = catTypes.TryGetValue(name, out var cat)
-                    ? TemplateManifest.ProtocolOrNull(cat) : null;
+                    ? manifest.ProtocolOrNull(cat) : null;
                 if (protocol?.RawStateRange is { } range) AssertEveryMoveIsPublished(plan, range, name, cat);
                 if (protocol?.CrossesBothWays == true) plan = WithReverseCrossings(plan);
                 AssertEveryRuleIsEnforceable(name, cat, protocol, plan);
