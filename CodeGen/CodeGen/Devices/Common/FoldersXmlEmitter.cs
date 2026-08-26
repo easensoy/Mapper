@@ -20,21 +20,26 @@ namespace CodeGen.Devices.Core
             sysdevId.Equals(RevPiSysdevId, StringComparison.OrdinalIgnoreCase);
 
         // Each device emitter owns its own sysdev id; restating them here is how they drift.
-        const string M262SysdevId  = CodeGen.Devices.M262.M262SysdevEmitter.M262SysdevId;
-        const string M580SysdevId  = Station2DeviceEmitter.M580SysdevId;
-        const string BX1SysdevId   = Station2DeviceEmitter.BX1SysdevId;
-        const string RevPiSysdevId = CodeGen.Devices.RevPi.RevPiDeviceEmitter.SysdevId;
+        static string M262SysdevId => CodeGen.Devices.M262.M262SysdevEmitter.M262SysdevId;
+        static string M580SysdevId => Station2DeviceEmitter.M580SysdevId;
+        static string BX1SysdevId => Station2DeviceEmitter.BX1SysdevId;
+        static string RevPiSysdevId => CodeGen.Devices.RevPi.RevPiDeviceEmitter.SysdevId;
 
         public sealed class EmitResult
         {
             public int ItemsAdded { get; set; }
             public int ItemsRemoved { get; set; }
             public System.Collections.Generic.List<string> Warnings { get; } = new();
-            public string? FilePath { get; set; }
-        }
+            }
 
         // partialRevPi adds the RevPi sysdev alongside the M262 that keeps the rest of the Feed station.
-        public static EmitResult Register(MapperConfig cfg, bool partialRevPi = false,
+        // The separately-owned HMI module registers its own device and hands the paths it was given;
+        // a generation hands its whole configuration. One implementation, two ways of being asked.
+        public static EmitResult Register(MapperConfig paths, bool partialRevPi = false,
+            params string[] additionalSysdevIds) =>
+            Register(Configuration.CompilerConfiguration.Load(paths), partialRevPi, additionalSysdevIds);
+
+        public static EmitResult Register(Configuration.CompilerConfiguration cfg, bool partialRevPi = false,
             params string[] additionalSysdevIds)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
@@ -46,7 +51,6 @@ namespace CodeGen.Devices.Core
                 return result;
             }
             var foldersPath = Path.Combine(eaeRoot, "General", "Folders.xml");
-            result.FilePath = foldersPath;
             if (!File.Exists(foldersPath))
             {
                 result.Warnings.Add($"General\\Folders.xml not found at {foldersPath}.");
