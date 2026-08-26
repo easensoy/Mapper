@@ -26,7 +26,7 @@ namespace CodeGen.Devices.Core
             Configuration.CompilerConfiguration cfg, CodeGen.Translation.PlcAssignment plc, string? configuredPath)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
-            var target = Mapping.TargetRegistry.Of(plc);
+            var target = cfg.Targets.Of(plc);
             return Deploy(
                 EaeProjectLayout.DeriveEaeProjectRoot(cfg),
                 target.DeviceType,
