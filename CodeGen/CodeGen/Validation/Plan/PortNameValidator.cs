@@ -21,9 +21,9 @@ namespace CodeGen.Translation
         // the project is cleaned, so a declaration that has drifted from its archive stops the run with
         // a diagnostic rather than emitting a wire to a port that is not there - which EAE rejects the
         // whole resource for, after the previous project has already been wiped.
-        public static void AssertContractMatchesArchives(string templateLibraryPath)
+        public static void AssertContractMatchesArchives(string templateLibraryPath, Mapping.TemplateIndex manifest)
         {
-            var mismatches = Validate(templateLibraryPath)
+            var mismatches = Validate(templateLibraryPath, manifest)
                 .Where(m => m.ExpectedPort.Length > 0).ToList();
             if (mismatches.Count == 0) return;
             throw new InvalidOperationException(
@@ -33,7 +33,7 @@ namespace CodeGen.Translation
                 ". The declaration and the shipped FBT have drifted apart.");
         }
 
-        public static List<PortNameMismatch> Validate(string templateLibraryPath)
+        public static List<PortNameMismatch> Validate(string templateLibraryPath, Mapping.TemplateIndex manifest)
         {
             var mismatches = new List<PortNameMismatch>();
             if (string.IsNullOrEmpty(templateLibraryPath) || !Directory.Exists(templateLibraryPath))
@@ -46,7 +46,7 @@ namespace CodeGen.Translation
                 return mismatches;
             }
 
-            foreach (var kvp in TemplateManifest.PortContract)
+            foreach (var kvp in manifest.PortContract)
             {
                 var fbType = kvp.Key;
                 var expected = kvp.Value;
