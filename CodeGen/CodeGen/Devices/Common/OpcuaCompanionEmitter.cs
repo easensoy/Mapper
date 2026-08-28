@@ -10,8 +10,24 @@ namespace CodeGen.Artefacts
     // whose UID is the parent folder GUID. Only opcua.xml is Mapper-written; EAE produces the rest on open.
     public static class OpcuaCompanionEmitter
     {
+        // The parameterless-configuration overloads are COMPATIBILITY ENTRY POINTS: the prebuilt VueOne
+        // runner links these exact signatures, so they cannot take a snapshot and read the shipped
+        // bundle themselves. Every in-process caller uses the cfg-carrying overload beside each, so the
+        // core never reaches a configuration global to render a companion document.
+        public static void EmitForArtefact(string artefactPath) =>
+            EmitForArtefact(SharedBundle(), artefactPath);
+
+        public static int EnsureOpcuaInAllResourceFolders(string eaeRoot) =>
+            EnsureOpcuaInAllResourceFolders(SharedBundle(), eaeRoot);
+
+        static CompilerConfiguration? SharedBundle()
+        {
+            try { return CompilerConfiguration.Load(MapperConfig.Load()); }
+            catch { return null; }   // fall back to the default template root
+        }
+
         // Writes opcua.xml into a {stem}/ folder beside the artefact (UID = container GUID).
-        public static void EmitForArtefact(string artefactPath)
+        public static void EmitForArtefact(CompilerConfiguration? cfg, string artefactPath)
         {
             if (string.IsNullOrWhiteSpace(artefactPath)) return;
             var parentDir = Path.GetDirectoryName(artefactPath);
@@ -25,11 +41,11 @@ namespace CodeGen.Artefacts
 
             var uid = Path.GetFileName(parentDir);
 
-            WriteOpcuaFile(Path.Combine(opcuaDir, "opcua.xml"), uid);
+            WriteOpcuaFile(cfg, Path.Combine(opcuaDir, "opcua.xml"), uid);
         }
 
         // Fills any missing opcua.xml in every companion folder so EAE's Missing Project Files check passes.
-        public static int EnsureOpcuaInAllResourceFolders(string eaeRoot)
+        public static int EnsureOpcuaInAllResourceFolders(CompilerConfiguration? cfg, string eaeRoot)
         {
             if (string.IsNullOrWhiteSpace(eaeRoot)) return 0;
 
@@ -55,7 +71,7 @@ namespace CodeGen.Artefacts
                     if (File.Exists(opcuaPath)) continue; // never overwrite
 
                     var uid = Path.GetFileName(parent);
-                    if (WriteOpcuaFile(opcuaPath, uid)) created++;
+                    if (WriteOpcuaFile(cfg, opcuaPath, uid)) created++;
                 }
                 catch
                 {
@@ -83,21 +99,13 @@ namespace CodeGen.Artefacts
             return false;
         }
 
-        // The two public entry points are linked by the VueOne hidden runner, so their signatures must not change.
-        internal static string BuildOpcuaCompanion(string uid)
-        {
-            // This overload is a compatibility entry point the prebuilt VueOne runner links, so it has
-            // no configuration handed to it and reads its own - which makes it a composition root.
-            Configuration.CompilerConfiguration? cfg = null;
-            try { cfg = Configuration.CompilerConfiguration.Load(MapperConfig.Load()); }
-            catch { /* fall back to the default template root */ }
-            return TemplateDocument.Load(cfg, @"Companion\opcua.xml",
+        internal static string BuildOpcuaCompanion(CompilerConfiguration? cfg, string uid) =>
+            TemplateDocument.Load(cfg, @"Companion\opcua.xml",
                 new Dictionary<string, string> { ["Uid"] = uid });
-        }
 
-        private static bool WriteOpcuaFile(string opcuaPath, string uid)
+        private static bool WriteOpcuaFile(CompilerConfiguration? cfg, string opcuaPath, string uid)
         {
-            var content = BuildOpcuaCompanion(uid);
+            var content = BuildOpcuaCompanion(cfg, uid);
 
             for (int attempt = 0; attempt < 4; attempt++)
             {
