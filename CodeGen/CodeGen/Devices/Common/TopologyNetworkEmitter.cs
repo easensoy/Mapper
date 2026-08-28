@@ -11,22 +11,15 @@ using CodeGen.Translation;
 
 namespace CodeGen.Devices.Core
 {
-    // Emits Topology Physical-Views NETWORK objects (L2 Switch_1 + Wire JSONs). A wire's M580 destination must
-    // be the nested CPU UUID that owns ETH1, not the rack root.
+    // Emits Topology Physical-Views NETWORK objects (the L2 switch + the Wire JSONs) by RENDERING THE
+    // DECLARED GRAPH in `device.yml topology:`. Which node is cabled to which, on which port, and which
+    // of a node's identities the cable lands on are all declared; this emitter decides none of it.
+    //
+    // It used to carry five wires as literals, each naming a controller and a port number, with the
+    // switch's port allocation stated only in a comment - so two devices claiming one port was
+    // unrepresentable as an error, and a new device meant editing this file.
     public static class TopologyNetworkEmitter
     {
-        static string Switch1Uuid(Configuration.CompilerConfiguration cfg) =>
-            cfg.Devices.Installation.SwitchEquipment;
-
-        // Endpoint UUIDs MUST match what M262TopologyEmitter + Station2DeviceEmitter write.
-        static string M262EquipmentUuid => CodeGen.Devices.M262.M262TopologyEmitter.DefaultM262Uuid;
-        static string M580CpuUuid => Station2DeviceEmitter.M580CpuUuid;
-        const string FallbackSolutionUuid = "00000000-0000-0000-0000-000000000000";
-
-        static string Bx1EtherNetIpUuid => Station2DeviceEmitter.BX1EtherNetIpUuid;  // EtherNetIPDevice_1
-        static string Bx1HmiB1XUuid => Station2DeviceEmitter.BX1EquipmentUuid;   // HMIB1X_1 (BX1 panel)
-        // RevPi NIC_2 uuid — MUST match RevPiDeviceEmitter.RevPiNicUuid.
-        static string RevPiNicUuid => CodeGen.Devices.RevPi.RevPiDeviceEmitter.NicUuid;
 
         public sealed class EmitResult
         {
@@ -59,57 +52,32 @@ namespace CodeGen.Devices.Core
             }
 
             // DomainTag must be the live SolutionId; a zero DomainTag fails topology-import.
-            var solutionId = EaeProjectLayout.ReadProjectGuid(eaeRoot) ?? FallbackSolutionUuid;
+            var solutionId = EaeProjectLayout.ReadProjectGuid(eaeRoot) ?? Artefacts.EaeAbi.UnknownSolution;
 
-            ForceWriteJson(topologyDir, "Equipment_Switch_1.json", BuildSwitchJson(cfg, solutionId), result, eaeRoot);
-            ForceWriteJson(topologyDir, "Wire_M262_to_Switch1.json", BuildWireJson(cfg,
-                identifier:                 "M262_to_Switch1",
-                sourceEquipmentUuid:        M262EquipmentUuid,
-                sourcePortIdentifier:       "Ethernet1",
-                destinationEquipmentUuid:   Switch1Uuid(cfg),
-                destinationPortIdentifier:  "Port1"), result, eaeRoot);
-            ForceWriteJson(topologyDir, "Wire_Switch1_to_M580.json", BuildWireJson(cfg,
-                identifier:                 "Switch1_to_M580",
-                sourceEquipmentUuid:        Switch1Uuid(cfg),
-                sourcePortIdentifier:       "Port2",
-                destinationEquipmentUuid:   M580CpuUuid,
-                destinationPortIdentifier:  "ETH1"), result, eaeRoot);
+            var registerNames = new List<string>();
+            var graph = cfg.Devices.Topology;
 
-            var registerNames = new List<string>
+            // Nodes that are not deployment targets (the switch), in declaration order.
+            foreach (var node in graph.Nodes.Where(n => n.Emit))
             {
-                "Equipment_Switch_1.json",
-                "Wire_M262_to_Switch1.json",
-                "Wire_Switch1_to_M580.json",
-            };
-
-            // BX1 EtherNet/IP daisy-chain: Switch Port3 -> coupler -> HMIB1X LAN1.
-            {
-                ForceWriteJson(topologyDir, "Wire_Switch1_to_EtherNetIP.json", BuildWireJson(cfg,
-                    identifier:                 "Switch1_to_EtherNetIP",
-                    sourceEquipmentUuid:        Switch1Uuid(cfg),
-                    sourcePortIdentifier:       "Port3",
-                    destinationEquipmentUuid:   Bx1EtherNetIpUuid,
-                    destinationPortIdentifier:  "Port2"), result, eaeRoot);
-                ForceWriteJson(topologyDir, "Wire_EtherNetIP_to_BX1.json", BuildWireJson(cfg,
-                    identifier:                 "EtherNetIP_to_BX1",
-                    sourceEquipmentUuid:        Bx1EtherNetIpUuid,
-                    sourcePortIdentifier:       "Port1",
-                    destinationEquipmentUuid:   Bx1HmiB1XUuid,
-                    destinationPortIdentifier:  "LAN1"), result, eaeRoot);
-                registerNames.Add("Wire_Switch1_to_EtherNetIP.json");
-                registerNames.Add("Wire_EtherNetIP_to_BX1.json");
+                var name = "Equipment_" + node.Id + ".json";
+                ForceWriteJson(topologyDir, name, BuildNodeJson(cfg, node, solutionId), result, eaeRoot);
+                registerNames.Add(name);
             }
 
-            // RevPi connects to free Switch Port4 via its NIC_2 (Port1=M262, Port2=M580, Port3=BX1); without this wire it floats.
-            if (ctx.Profile.HasAssignments)
+            // Links in DECLARATION order, which is the order they are registered in and therefore the
+            // order TopologyManager.topologyproj carries them.
+            foreach (var link in graph.Links)
             {
-                ForceWriteJson(topologyDir, "Wire_RevPi_to_Switch1.json", BuildWireJson(cfg,
-                    identifier:                 "RevPi_to_Switch1",
-                    sourceEquipmentUuid:        RevPiNicUuid,
-                    sourcePortIdentifier:       "Port1",
-                    destinationEquipmentUuid:   Switch1Uuid(cfg),
-                    destinationPortIdentifier:  "Port4"), result, eaeRoot);
-                registerNames.Add("Wire_RevPi_to_Switch1.json");
+                if (link.RequiresRelocation && !ctx.Profile.HasAssignments) continue;
+                var name = "Wire_" + link.Identifier + ".json";
+                ForceWriteJson(topologyDir, name, BuildWireJson(cfg,
+                    identifier:                 link.Identifier,
+                    sourceEquipmentUuid:        Endpoint(cfg, link, link.From),
+                    sourcePortIdentifier:       link.From.Port,
+                    destinationEquipmentUuid:   Endpoint(cfg, link, link.To),
+                    destinationPortIdentifier:  link.To.Port), result, eaeRoot);
+                registerNames.Add(name);
             }
 
             var topologyProj = Path.Combine(topologyDir, "TopologyManager.topologyproj");
@@ -146,7 +114,7 @@ namespace CodeGen.Devices.Core
                 }
                 if (known.Count == 0) return;   // safety: never sweep blind
 
-                const string Zero = "00000000-0000-0000-0000-000000000000";
+                const string Zero = Artefacts.EaeAbi.NullUuid;
                 var endpointRx = new Regex(
                     "\"(?:sourceEquipment|destinationEquipment)\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"");
 
@@ -219,11 +187,36 @@ namespace CodeGen.Devices.Core
 
         // Both documents live in the Template Library, so their bytes - including their line
         // endings - come from a file rather than from the newlines of this .cs.
-        static string BuildSwitchJson(Configuration.CompilerConfiguration cfg, string solutionId) =>
-            TemplateDocument.Load(cfg, @"Topology\Equipment_Switch.json",
+        // The uuid a cable end lands on. Every declared endpoint is validated when device.yml loads, so
+        // reaching an empty one here means a node whose identity is blank - which would write a wire EAE
+        // cannot resolve, and ONE unresolvable wire fails the whole topology import with a 500 that names
+        // nothing. It stops the run instead.
+        static string Endpoint(Configuration.CompilerConfiguration cfg,
+            Configuration.TopologyLink link, Configuration.TopologyEndpoint e)
+        {
+            var node = cfg.Devices.Topology.Nodes.FirstOrDefault(n =>
+                string.Equals(n.Id, e.Node, StringComparison.OrdinalIgnoreCase));
+            var uuid = node != null
+                ? node.Equipment
+                : Configuration.DeviceConfig.EndpointUuid(
+                    cfg.Devices.Targets.FirstOrDefault(t =>
+                        string.Equals(t.Plc.Name, e.Node, StringComparison.OrdinalIgnoreCase))?.Identity
+                    ?? new Configuration.DeviceIdentity(), e.Endpoint);
+
+            if (string.IsNullOrWhiteSpace(uuid))
+                throw new InvalidOperationException(
+                    $"[Topology] link '{link.Identifier}' attaches to '{e.Endpoint}' on '{e.Node}', which " +
+                    "resolves to no equipment uuid. EAE rejects the whole topology on one unresolvable " +
+                    "endpoint, so nothing was written. Generation ABORTED.");
+            return uuid;
+        }
+
+        static string BuildNodeJson(Configuration.CompilerConfiguration cfg,
+            Configuration.TopologyNode node, string solutionId) =>
+            TemplateDocument.Load(cfg, Path.Combine("Topology", node.Template),
                 new Dictionary<string, string>
                 {
-                    ["SwitchUuid"] = Switch1Uuid(cfg),
+                    ["SwitchUuid"] = node.Equipment,
                     ["SolutionId"] = solutionId,
                 });
 
