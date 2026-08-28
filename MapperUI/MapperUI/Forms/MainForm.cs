@@ -130,8 +130,10 @@ namespace MapperUI
             colDevice.Items.Clear();
             foreach (var t in targets) colDevice.Items.Add(t.Plc.ToString());
 
-            var home = targets.FirstOrDefault(t => t.HostsFeedStation && !t.ReceivesRelocatedComponents);
-            var relocation = targets.FirstOrDefault(t => t.ReceivesRelocatedComponents);
+            // The pair is ONE declared relationship: the stand-in names the target it relieves, so the
+            // grid cannot offer a move to a controller that stands in for nobody.
+            var relocation = targets.FirstOrDefault(t => t.StandsInFor != null);
+            var home = targets.FirstOrDefault(t => t.Plc == relocation?.StandsInFor);
             colDevice.ToolTipText = relocation == null
                 ? "Hosting controller for this component."
                 : $"Hosting controller. Set a component to {relocation.Plc} to host it there instead of " +
@@ -145,9 +147,9 @@ namespace MapperUI
         // backend list a run does rather than naming a particular device's injector, so the grid can
         // never describe a different set than Generate uses, and a project whose relocation host is
         // different hardware needs no edit here.
-        static IReadOnlySet<string> ServableBy(CodeGen.Translation.PlcAssignment plc) =>
-            CodeGen.Application.GenerateProject.Backends()
-                .FirstOrDefault(b => b.Target == plc)?.ServableComponents
+        IReadOnlySet<string> ServableBy(CodeGen.Translation.PlcAssignment plc) =>
+            CodeGen.Application.GenerateProject.Backends(Declarations())
+                .FirstOrDefault(b => b.Target == plc)?.ServableComponents(Declarations())
             ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         protected override void OnFormClosed(FormClosedEventArgs e)
@@ -271,7 +273,7 @@ namespace MapperUI
             {
                 // The SAME configuration and placement the run is planned with, so the preview cannot
                 // show a different project than Generate writes.
-                var previewCfg = Cfg();
+                var previewCfg = Declarations();
                 var previewProfile = CodeGen.Mapping.DeploymentProfile.Relocating(
                     CollectRevPiSelection(), Declarations());
 
@@ -435,7 +437,7 @@ namespace MapperUI
         IReadOnlySet<string> CollectRevPiSelection()
         {
             var relocation = Declarations().Targets.All
-                .FirstOrDefault(t => t.ReceivesRelocatedComponents);
+                .FirstOrDefault(t => t.StandsInFor != null);
             if (relocation == null) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             return _deviceOverrides
@@ -449,8 +451,10 @@ namespace MapperUI
         void LogControllerChoice(IReadOnlySet<string> relocated)
         {
             var targets = Declarations().Targets.All;
-            var home = targets.FirstOrDefault(t => t.HostsFeedStation && !t.ReceivesRelocatedComponents);
-            var relocation = targets.FirstOrDefault(t => t.ReceivesRelocatedComponents);
+            // The pair is ONE declared relationship: the stand-in names the target it relieves, so the
+            // grid cannot offer a move to a controller that stands in for nobody.
+            var relocation = targets.FirstOrDefault(t => t.StandsInFor != null);
+            var home = targets.FirstOrDefault(t => t.Plc == relocation?.StandsInFor);
             if (relocated.Count == 0 || relocation == null)
             {
                 AppendActivity($"[Target] Feed controller: {home?.Plc.ToString() ?? "(none declared)"} " +
@@ -757,7 +761,7 @@ namespace MapperUI
         bool IsRelocationTarget(string plc) =>
             Declarations().Targets.All.Any(t =>
                 string.Equals(t.Plc.ToString(), plc, StringComparison.Ordinal) &&
-                t.ReceivesRelocatedComponents);
+                t.StandsInFor != null);
 
         // Designer anchors don't stretch the body to full width on some DPI/AutoScale configs, so size it here.
         protected override void OnClientSizeChanged(EventArgs e)
