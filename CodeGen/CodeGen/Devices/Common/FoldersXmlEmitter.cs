@@ -6,24 +6,17 @@ using CodeGen.Configuration;
 
 namespace CodeGen.Devices.Core
 {
-    // Registers M262/M580/BX1 sysdev GUIDs in General\Folders.xml. A sysdev NOT listed here is
+    // Registers the emitted devices' sysdev GUIDs in General\Folders.xml. A sysdev NOT listed here is
     // silently dropped from EAE's Deploy & Diagnostic enumeration even if it exists on disk + in the dfbproj.
     // Idempotent; save is skipped when nothing changed (no spurious "Reload Solution" prompt).
     public static class FoldersXmlEmitter
     {
-        // Only the devices this emitter registers are ever removed again: anything else in the file was
-        // put there by EAE or by hand and is not this generator's to sweep.
-        private static bool Owned(string sysdevId) =>
-            sysdevId.Equals(M262SysdevId, StringComparison.OrdinalIgnoreCase) ||
-            sysdevId.Equals(M580SysdevId, StringComparison.OrdinalIgnoreCase) ||
-            sysdevId.Equals(BX1SysdevId, StringComparison.OrdinalIgnoreCase) ||
-            sysdevId.Equals(RevPiSysdevId, StringComparison.OrdinalIgnoreCase);
-
-        // Each device emitter owns its own sysdev id; restating them here is how they drift.
-        static string M262SysdevId => CodeGen.Devices.M262.M262SysdevEmitter.M262SysdevId;
-        static string M580SysdevId => Station2DeviceEmitter.M580SysdevId;
-        static string BX1SysdevId => Station2DeviceEmitter.BX1SysdevId;
-        static string RevPiSysdevId => CodeGen.Devices.RevPi.RevPiDeviceEmitter.SysdevId;
+        // Only the devices this emitter could register are ever removed again: anything else in the file
+        // was put there by EAE or by hand and is not this generator's to sweep. DECLARED, not listed:
+        // a fixed four-name list silently stopped sweeping the moment a fifth target was declared.
+        private static bool Owned(Configuration.CompilerConfiguration cfg, string sysdevId) =>
+            cfg.Devices.Targets.Any(t =>
+                sysdevId.Equals(t.Identity.Sysdev, StringComparison.OrdinalIgnoreCase));
 
         public sealed class EmitResult
         {
@@ -32,7 +25,7 @@ namespace CodeGen.Devices.Core
             public System.Collections.Generic.List<string> Warnings { get; } = new();
             }
 
-        // partialRevPi adds the RevPi sysdev alongside the M262 that keeps the rest of the Feed station.
+        // anythingRelocated says whether this run moved a component onto a relocation target, which is
         // The separately-owned HMI module registers its own device and hands the paths it was given;
         // a generation hands its whole configuration. One implementation, two ways of being asked.
         // A sysdev missing from Folders.xml is silently dropped from EAE's Solution Explorer AND
@@ -42,6 +35,9 @@ namespace CodeGen.Devices.Core
             "The devices this run emits would not be registered, so EAE would open a project that "
             + "silently omits them. Generation ABORTED.";
 
+        // A COMPATIBILITY SIGNATURE. The separately-owned HMI module calls this exact shape and cannot be
+        // handed a run's snapshot, so this overload composes one. Every in-process caller inside the
+        // compiler uses the cfg-taking overload below.
         public static EmitResult Register(MapperConfig paths, bool partialRevPi = false,
             params string[] additionalSysdevIds) =>
             Register(Configuration.CompilerConfiguration.Load(paths), partialRevPi, additionalSysdevIds);
@@ -104,13 +100,13 @@ namespace CodeGen.Devices.Core
                      .Where(s => s.Length > 0),
                 StringComparer.OrdinalIgnoreCase);
 
-            // The M262 always hosts the Feed station; the partial swap adds a RevPi alongside it.
-            var feedSysdevIds = partialRevPi
-                ? new[] { M262SysdevId, RevPiSysdevId }
-                : new[] { M262SysdevId };
-            foreach (var sysdevId in feedSysdevIds
-                         .Concat(new[] { M580SysdevId, BX1SysdevId })
-                         .Concat(additionalSysdevIds ?? Array.Empty<string>()))
+            // THE DEVICES THIS RUN ACTUALLY EMITS, in the order it drives them. A target that only
+            // exists when something is relocated onto it is registered only when something was, which
+            // is the same rule the emission itself follows - so the file can never enumerate a device
+            // that is not on disk, whatever the declared target set happens to be.
+            var emitted = EmittedSysdevIds(cfg, partialRevPi)
+                .Concat(additionalSysdevIds ?? Array.Empty<string>()).ToList();
+            foreach (var sysdevId in emitted)
             {
                 if (existing.Contains(sysdevId)) continue;
                 items.Add(new XElement(ns + "item", sysdevId));
@@ -120,11 +116,9 @@ namespace CodeGen.Devices.Core
             // A device this run does NOT emit must lose its registration, or EAE keeps enumerating one
             // that is no longer on disk: the previous run's selection would survive into this one.
             var registered = new System.Collections.Generic.HashSet<string>(
-                feedSysdevIds.Concat(new[] { M580SysdevId, BX1SysdevId })
-                             .Concat(additionalSysdevIds ?? Array.Empty<string>()),
-                StringComparer.OrdinalIgnoreCase);
+                emitted, StringComparer.OrdinalIgnoreCase);
             var stale = items.Elements(ns + "item")
-                .Where(e => Owned((e.Value ?? string.Empty).Trim()) &&
+                .Where(e => Owned(cfg, (e.Value ?? string.Empty).Trim()) &&
                             !registered.Contains((e.Value ?? string.Empty).Trim()))
                 .ToList();
             foreach (var e in stale) { e.Remove(); result.ItemsRemoved++; }
@@ -132,6 +126,21 @@ namespace CodeGen.Devices.Core
             if (result.ItemsAdded > 0 || result.ItemsRemoved > 0)
                 doc.Save(foldersPath);
             return result;
+        }
+    
+        // The sysdev of every target this run emits, in the DECLARED DRIVE ORDER - which is the order
+        // the backends run in, so the registration matches the emission it describes. A target that
+        // receives relocated components is emitted only when this run relocated something onto it.
+        static System.Collections.Generic.IEnumerable<string> EmittedSysdevIds(
+            Configuration.CompilerConfiguration cfg, bool anythingRelocated)
+        {
+            var byPlc = cfg.Devices.Targets.ToDictionary(t => t.Plc);
+            foreach (var plc in cfg.Devices.BackendEmitOrder)
+            {
+                if (!byPlc.TryGetValue(plc, out var t)) continue;
+                if (!string.IsNullOrWhiteSpace(t.StandsInFor) && !anythingRelocated) continue;
+                yield return t.Identity.Sysdev;
+            }
         }
     }
 }
