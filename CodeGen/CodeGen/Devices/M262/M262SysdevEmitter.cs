@@ -13,20 +13,18 @@ namespace CodeGen.Devices.M262
     public static class M262SysdevEmitter
     {
         const string LibElNs = CodeGen.Devices.Core.Station2DeviceEmitter.LibElNs;
-        const string ApplicationName = "WMG";
-        static string DeviceName(Mapping.TargetIndex t) =>
-            t.Of(CodeGen.Translation.PlcAssignment.Named("M262")).DeviceName
-            ?? throw new InvalidOperationException(
-                "device.yml declares no deviceName for target 'M262', so its system device has no name.");
+        static string ApplicationName => Configuration.GenerationConfig.Application;
+        // EVERY FACT ABOUT THE DEVICE COMES FROM THE DESCRIPTOR THIS EMITTER WAS GIVEN.
+        //
+        // These were statics keyed on the name "M262", so a second controller of this kind could only
+        // ever be emitted with the first one's sysdev id, resource id and device name - three EAE
+        // identities that must be unique per device. The target travels in; nothing here names one.
+        static string DeviceName(Mapping.TargetDescriptor t) =>
+            t.DeviceName ?? throw new InvalidOperationException(
+                $"device.yml declares no deviceName for target '{t.Plc}', so its system device has no name.");
 
         // Must match what EAE created: the .hcf Form-1 binding and the FB mirror key off these.
-        static Configuration.DeviceIdentity M262Id =>
-            Configuration.DeviceConfig.Identity(CodeGen.Translation.PlcAssignment.Named("M262"));
-
-        internal static string M262SysdevId => M262Id.Sysdev;
-        static string M262ResourceId => M262Id.Resource;
-
-        public static bool M262SysdevAlreadyExists(Configuration.CompilerConfiguration cfg)
+        public static bool SysdevAlreadyExists(Configuration.CompilerConfiguration cfg, PlcAssignment target)
         {
             if (cfg == null) return false;
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
@@ -36,12 +34,12 @@ namespace CodeGen.Devices.M262
             foreach (var sysdev in Directory.EnumerateFiles(
                 systemDir, "*.sysdev", SearchOption.AllDirectories))
             {
-                if (IsM262SysdevFile(sysdev, cfg.Targets)) return true;
+                if (IsSysdevFile(sysdev, cfg.Targets.Of(target))) return true;
             }
             return false;
         }
 
-        static bool IsM262SysdevFile(string sysdevPath, Mapping.TargetIndex targets)
+        static bool IsSysdevFile(string sysdevPath, Mapping.TargetDescriptor target)
         {
             try
             {
@@ -50,15 +48,16 @@ namespace CodeGen.Devices.M262
                 if (root == null) return false;
                 var type  = (string?)root.Attribute("Type")      ?? string.Empty;
                 var nspac = (string?)root.Attribute("Namespace") ?? string.Empty;
-                return string.Equals(type, targets.Of(CodeGen.Translation.PlcAssignment.Named("M262")).DeviceType, StringComparison.Ordinal) &&
-                       string.Equals(nspac, "SE.DPAC", StringComparison.Ordinal);
+                return string.Equals(type, target.DeviceType, StringComparison.Ordinal) &&
+                       string.Equals(nspac, Mapping.TargetDescriptor.DeviceNamespace, StringComparison.Ordinal);
             }
             catch { return false; }
         }
 
-        public static SysdevEmitResult Emit(GenerationContext ctx)
+        public static SysdevEmitResult Emit(GenerationContext ctx, PlcAssignment target)
         {
             var cfg = ctx.Cfg;
+            var self = ctx.Targets.Of(target);
             var allocation = ctx.Allocation;
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
 
@@ -70,28 +69,28 @@ namespace CodeGen.Devices.M262
 
             // device.yml owns the resource name; reading it here is what keeps the sysdev, the .hcf
             // symlinks and the sysres mirror agreeing about what this resource is called.
-            var resourceName = ctx.Targets.Of(CodeGen.Translation.PlcAssignment.Named("M262")).ResourceName;
+            var resourceName = self.ResourceName;
 
             bool justBootstrapped = false;
-            var sysdevPath = FindSysdev(eaeRoot, ctx.Targets);
+            var sysdevPath = FindSysdev(eaeRoot, self);
             if (sysdevPath == null)
             {
-                sysdevPath = BootstrapM262Device(cfg, eaeRoot, resourceName);
+                sysdevPath = BootstrapDevice(cfg, self, eaeRoot, resourceName);
                 justBootstrapped = sysdevPath != null;
                 if (sysdevPath == null)
                     throw new FileNotFoundException(
                         $"No .sysdev and no System GUID folder under {eaeRoot}\\IEC61499\\System\\ — " +
-                        "cannot bootstrap M262 (the .system project root must exist).");
+                        $"cannot bootstrap '{target}' (the .system project root must exist).");
             }
 
             bool preserveDevice =
-                IsM262SysdevFile(sysdevPath, ctx.Targets) && !justBootstrapped;
+                IsSysdevFile(sysdevPath, self) && !justBootstrapped;
 
             string propsPath = string.Empty;
             if (!preserveDevice)
             {
-                RewriteSysdev(sysdevPath, DeviceName(ctx.Targets), ctx.Targets.Of(CodeGen.Translation.PlcAssignment.Named("M262")).DeviceType,
-                    cfg.Devices.M262.TargetIp ?? string.Empty, resourceName);
+                RewriteSysdev(sysdevPath, DeviceName(self), self.DeviceType,
+                    cfg.Devices.NetworkOf(target.Name).TargetIp ?? string.Empty, resourceName);
                 var sysresPathForRename = EaeProjectLayout.FindSysresFor(sysdevPath);
                 if (sysresPathForRename != null)
                     RenameSysresName(sysresPathForRename, resourceName);
@@ -132,18 +131,18 @@ namespace CodeGen.Devices.M262
 
             int sysresMirrorCount = 0;
             if (sysresPath != null && fbInstances.Count > 0)
-                // Mirror only the M262 (Feed Station) FBs — Station-2 FBs live on M580/BX1.
+                // Only the FBs the plan placed on THIS target: another one's live on its own resource.
                 sysresMirrorCount = SysresFbMirror.MirrorFbsIntoSysres(
                     sysresPath,
-                    fbInstances.Where(f => SysresFbMirror.BucketFor(f.Name, allocation, ctx.Cfg) == PlcAssignment.Named("M262")).ToList(),
-                    ctx.Targets.BootFor(PlcAssignment.Named("M262"), ctx.Layout), ctx.Manifest);
+                    fbInstances.Where(f => SysresFbMirror.BucketFor(f.Name, allocation, ctx.Cfg) == self.Plc).ToList(),
+                    ctx.Targets.BootFor(self.Plc, ctx.Layout), ctx.Manifest);
 
             int systemMappingsAdded = 0;
 
             var dfbproj = EaeProjectLayout.FindDfbproj(eaeRoot);
             int registered = 0;
             if (dfbproj != null)
-                registered = DfbprojRegistrar.RegisterSystemDevice(dfbproj, eaeRoot, sysdevPath);
+                registered = DfbprojRegistrar.RegisterSystemDevice(dfbproj, eaeRoot, sysdevPath, self);
 
             return new SysdevEmitResult
             {
@@ -177,12 +176,12 @@ namespace CodeGen.Devices.M262
             return propsPath;
         }
 
-        static string? FindSysdev(string eaeRoot, Mapping.TargetIndex targets)
+        static string? FindSysdev(string eaeRoot, Mapping.TargetDescriptor target)
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
             if (!Directory.Exists(systemDir)) return null;
             return Directory.EnumerateFiles(systemDir, "*.sysdev", SearchOption.AllDirectories)
-                .FirstOrDefault(p => IsM262SysdevFile(p, targets));
+                .FirstOrDefault(p => IsSysdevFile(p, target));
         }
 
         static string? FindSystemFile(string eaeRoot)
@@ -194,7 +193,8 @@ namespace CodeGen.Devices.M262
         }
 
         // Creates the M262 logical device from scratch, the empty-start path after a Clean.
-        static string? BootstrapM262Device(Configuration.CompilerConfiguration cfg, string eaeRoot, string resourceName)
+        static string? BootstrapDevice(Configuration.CompilerConfiguration cfg,
+            Mapping.TargetDescriptor self, string eaeRoot, string resourceName)
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
             if (!Directory.Exists(systemDir)) return null;
@@ -206,27 +206,29 @@ namespace CodeGen.Devices.M262
                 });
             if (sysGuidDir == null) return null;
 
-            var sysdevPath = Path.Combine(sysGuidDir, $"{M262SysdevId}.sysdev");
-            File.WriteAllText(sysdevPath, Station2DeviceEmitter.BuildSysdevXml(cfg,
-                M262SysdevId, DeviceName(cfg.Targets), cfg.Targets.Of(CodeGen.Translation.PlcAssignment.Named("M262")).DeviceType, M262ResourceId, resourceName));
+            var sysdevId = self.Identity.Sysdev;
+            var resourceId = self.Identity.Resource;
 
-            var sysdevFolder = Path.Combine(sysGuidDir, M262SysdevId);
+            var sysdevPath = Path.Combine(sysGuidDir, $"{sysdevId}.sysdev");
+            File.WriteAllText(sysdevPath, Station2DeviceEmitter.BuildSysdevXml(cfg,
+                sysdevId, DeviceName(self), self.DeviceType, resourceId, resourceName));
+
+            var sysdevFolder = Path.Combine(sysGuidDir, sysdevId);
             Directory.CreateDirectory(sysdevFolder);
-            var sysresPath = Path.Combine(sysdevFolder, $"{M262ResourceId}.sysres");
+            var sysresPath = Path.Combine(sysdevFolder, $"{resourceId}.sysres");
             if (!File.Exists(sysresPath))
                 File.WriteAllText(sysresPath,
-                    Station2DeviceEmitter.BuildSysresXml(cfg, M262ResourceId, resourceName));
+                    Station2DeviceEmitter.BuildSysresXml(cfg, resourceId, resourceName));
 
             var e0601 = Path.Combine(sysdevFolder,
                 CodeGen.Devices.Core.Station2DeviceEmitter.SystemDevicePropertiesFile(cfg));
             if (!File.Exists(e0601))
                 File.WriteAllText(e0601, Station2DeviceEmitter.BuildEmptySystemDeviceProps(cfg));
 
-            var simBind = Path.Combine(sysdevFolder, $"{M262SysdevId}.Simulation.Binding.xml");
+            var simBind = Path.Combine(sysdevFolder, $"{sysdevId}.Simulation.Binding.xml");
             File.WriteAllText(simBind,
-                Station2DeviceEmitter.BuildSimulationBindingXml(cfg, M262SysdevId,
-                    cfg.Targets.Of(PlcAssignment.Named("M262")).SimulationDeployPort,
-                    cfg.Targets.Of(PlcAssignment.Named("M262")).SimulationArchivePort));
+                Station2DeviceEmitter.BuildSimulationBindingXml(cfg, sysdevId,
+                    self.SimulationDeployPort, self.SimulationArchivePort));
 
             return sysdevPath;
         }
@@ -243,7 +245,7 @@ namespace CodeGen.Devices.M262
 
             SetAttr(root, "Name", deviceName);
             SetAttr(root, "Type", deviceType);
-            SetAttr(root, "Namespace", "SE.DPAC");
+            SetAttr(root, "Namespace", Artefacts.EaeAbi.DeviceNamespace);
             SetAttr(root, "Locked", "false");
 
             foreach (var ipParam in root.Elements(ns + "Parameter")
@@ -272,8 +274,8 @@ namespace CodeGen.Devices.M262
                 resources.Add(res0);
             }
             SetAttr(res0, "Name", resourceName);
-            SetAttr(res0, "Type", "EMB_RES_ECO");
-            SetAttr(res0, "Namespace", "Runtime.Management");
+            SetAttr(res0, "Type", Artefacts.EaeAbi.EmbeddedResourceType);
+            SetAttr(res0, "Namespace", Artefacts.EaeAbi.RuntimeNamespace);
 
             doc.Save(sysdevPath);
         }
@@ -324,7 +326,7 @@ namespace CodeGen.Devices.M262
             {
                 var topoDir = Path.Combine(eaeRoot, "Topology");
                 if (!Directory.Exists(topoDir)) return;
-                const string ZeroDomain = "00000000-0000-0000-0000-000000000000";
+                const string ZeroDomain = Artefacts.EaeAbi.NoBroadcastDomain;
                 foreach (var path in Directory.EnumerateFiles(topoDir, "Equipment_*.json"))
                 {
                     try
