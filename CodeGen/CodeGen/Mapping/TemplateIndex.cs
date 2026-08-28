@@ -139,6 +139,10 @@ namespace CodeGen.Mapping
                 $"[CAT] '{catType}' declares no command protocol, so nothing can say which value drives " +
                 "it or which value means it arrived.");
 
+        /// How a type is asked to report a level it already holds, or null if it cannot be asked.
+        /// A type that declares no refresh is never sent one: the wait then relies on a real edge.
+        public RefreshDeclaration? RefreshOf(string? catType) => Find(catType)?.Refresh;
+
         /// Deployment inventory, in declaration order, minus the ones held back to the end.
         public IReadOnlyList<string> DeployedLast(ArtefactKind kind) =>
             Types.Where(t => t.Deploy && t.DeployLast && t.Kind == kind).Select(t => t.Name).ToList();
