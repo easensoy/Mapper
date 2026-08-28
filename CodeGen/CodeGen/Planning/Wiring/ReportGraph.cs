@@ -13,8 +13,8 @@ namespace CodeGen.Translation
     // one, every other controller has its own); DOMAIN is the ring it reports on in the FINISHED topology,
     // which is what decides whether two reporters land in the same state_table.
     //
-    // A carrier is a splice the profile declares and the MODEL selects: the merged ring, the cover detour,
-    // the discharge segment. An edge no carrier covers is named and generation stops.
+    // A carrier is a splice the declarations describe and the MODEL selects: the merged ring, a chain one
+    // target commands on another, the discharge segment. An edge no carrier covers is named and generation stops.
     public sealed class ReportGraph
     {
         private readonly ControllerAllocation _allocation;
@@ -158,11 +158,11 @@ namespace CodeGen.Translation
             // the commanding ring. Declared, not inferred from running no process of its own: a target
             // can legitimately host none and still not be something another controller reaches into.
             bool OnDetour(TransportEdge e) =>
-                targets.IsRegistered(e.To) && targets.Of(e.To).CarriesDetouredChain;
+                targets.IsRegistered(e.To) && targets.Of(e.To).ChainCommandedBy != null;
 
             // The rings BEFORE any carrier: targets hosting one station share theirs, everything else is
             // its own. This is what decides whether an edge needs a carrier at all.
-            var native = Partition(t => t.HostsFeedStation, targets);
+            var native = Partition(targets);
 
             // A merged ring already spans both ends, as does a pair on one native ring.
             bool Spanned(TransportEdge e) =>
@@ -189,7 +189,7 @@ namespace CodeGen.Translation
 
             // The FINISHED rings: the native partition, plus every carrier the model just selected. A
             // detoured device joins the ring of whichever target drives it; a merged ring joins them all.
-            var finished = Partition(t => t.HostsFeedStation, targets);
+            var finished = Partition(targets);
             foreach (var e in edges.Where(OnDetour)) finished.Union(e.From, e.To);
             if (merged) finished.UnionAll();
 
@@ -203,11 +203,14 @@ namespace CodeGen.Translation
         }
 
         // Targets grouped by the ring they share. Every declared target starts alone; a carrier joins two.
-        private static TargetPartition Partition(Func<TargetDescriptor, bool> sharesOneRing, Mapping.TargetIndex targets)
+        // The NATIVE rings: a ring owner and every stand-in that shares it. Union-find over the
+        // declared relationships, so two targets are on one ring because one of them says it stands in
+        // for the other - not because they happen to share a flag that names a station in one plant.
+        private static TargetPartition Partition(Mapping.TargetIndex targets)
         {
             var p = new TargetPartition(targets.All.Select(t => t.Plc));
-            var together = targets.All.Where(sharesOneRing).Select(t => t.Plc).ToList();
-            for (int i = 1; i < together.Count; i++) p.Union(together[0], together[i]);
+            foreach (var t in targets.All.Where(t => t.StandsInFor != null))
+                p.Union(t.StandsInFor!.Value, t.Plc);
             return p;
         }
 
