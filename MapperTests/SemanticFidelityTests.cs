@@ -426,8 +426,8 @@ namespace MapperTests
             // A roster row is DATA. Placing a process on a different target must not need a C# branch, so
             // the same plant is compiled four times and only the row moves. A target that exists only
             // when work is RELOCATED onto it is reached that way, which is how production reaches it.
-            bool relocated = TestConfig.Cfg.Targets.Of(target).ReceivesRelocatedComponents;
-            var rostered = relocated ? TestConfig.Cfg.Targets.FeedTarget : target;
+            var descriptor = TestConfig.Cfg.Targets.Of(target);
+            var rostered = descriptor.StandsInFor ?? target;
             var layout = FreshLayout();
             layout.Components.Add(new RosterEntry
             { Name = "Kiln_Line", Plc = rostered, Column = 9, Row = "Process" });
@@ -445,7 +445,9 @@ namespace MapperTests
             var cfg = TestConfig.Cfg.With(layout);
             var plan = GenerationContext.Plan(cfg, new[] { line, ram },
                 DeploymentProfile.Relocating(
-                    relocated ? new[] { "Kiln_Line", "Charge_Ram" } : System.Array.Empty<string>(), cfg));
+                    descriptor.StandsInFor != null
+                        ? new[] { "Kiln_Line", "Charge_Ram" }
+                        : System.Array.Empty<string>(), cfg));
 
             Assert.Contains("Kiln_Line", plan.ResourceFor(target).Processes);
             Assert.Contains(plan.Recipes.Keys, k => k == "Kiln_Line");
