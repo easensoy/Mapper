@@ -77,11 +77,11 @@ bringUp:
 # output is byte-identical only under M262_RES.
 # Each flag is a fact about the TOPOLOGY the target sits in, which an engineer may edit; what the flag
 # selects is backend code that must exist before the target can be named here at all.
-#   hostsFeedStation           runs the Feed station, so components upstream of the assembly side land here
+#   standsInFor <target>       takes over components moved off that target: shares its report ring,
+#                              owns none of its own, and is emitted only when something is moved onto it
+#   chainCommandedBy <target>  its components are commanded from that target, so its chain splices onto
+#                              that ring and is open at BOTH ends here; the commander opens the seam
 #   deviceLocalCanvas          its sysres canvas is device-local, so FBs translate to a local origin
-#   receivesRelocatedComponents  receives components moved off another target -> never swept from its sysres
-#   opensCoverSeam             hands the cover detour out, so its ring closes across the seam
-#   carriesDetouredChain       carries a chain another target commands, so it is open at both ends
 #   hcfTemplate                the authored hardware-config file carried verbatim into its device folder
 #   bootFbs                    the frozen EAE instance id per bootSequence role. EAE identifies an FB by
 #                              its ID, so a deployed resource's boot ids can never be regenerated: a new
@@ -168,7 +168,6 @@ targets:
     resourceName: M262_RES
     deviceType: M262_dPAC
     hcfTemplate: M262IO.hcf
-    hostsFeedStation: true
     bootFbs:
       - { role: FB1, id: 593A8F4FDEA0A668 }
       - { role: FB2, id: 3DB1FB0F578E5F1E }
@@ -194,7 +193,6 @@ targets:
     deviceType: M580_dPAC
     hcfTemplate: M580IO.hcf
     deviceLocalCanvas: true
-    opensCoverSeam: true
     bootFbs:
       - { role: FB1, id: 66C40EEF3F39D969 }
       - { role: FB2, id: ACED009B79DFCE69 }
@@ -236,7 +234,7 @@ targets:
     deviceName: BX1
     hcfTemplate: BX1IO.hcf
     deviceLocalCanvas: true
-    carriesDetouredChain: true
+    chainCommandedBy: M580
     ioBroker: BX1_IO
     bootFbs:
       - { role: FB1, id: 0FE5E1B2C3D4A5B6 }
@@ -281,11 +279,10 @@ targets:
     resourceName: RevPi_RES
     deviceType: Soft_dPAC
     deviceName: Revolution_Pi
-    hostsFeedStation: true
     # Components move HERE from their home controller while their process stays behind, so its ring
     # is what closes around them. That is relocation, not a detour: the chain is not commanded by
     # another controller, it is the same controller reaching a component that moved.
-    receivesRelocatedComponents: true
+    standsInFor: M262
     ioBroker: RevPI_IO
     bootFbs:
       - { role: FB1, id: 2AF90BCA49743BD3 }
@@ -330,3 +327,46 @@ installation:
   # plugin GUIDs, so EAE finds them by filename; renaming one silently drops that plugin's settings.
   deployPluginProperties: F513CAE3-7194-4086-936C-02912EA0B352.Properties.xml
   systemDeviceProperties: E0601B81-4A3A-4A96-B6C2-007BDC680D59.Properties.xml
+
+# ---------------------------------------------------------------------------------------------
+# THE PHYSICAL NETWORK, AS A GRAPH.
+#
+# What is cabled to what was five hardcoded wires in TopologyNetworkEmitter, each naming a controller
+# and a port number, with the switch's port allocation stated only in a comment. Nothing checked that
+# two devices did not claim one port, and adding a device meant editing C#.
+#
+# A LINK is emitted in the order it is declared here, because the order it is registered in
+# TopologyManager.topologyproj is the order the entries appear in that file.
+#
+# An ENDPOINT names a declared node and which of that node's identities the cable actually lands on.
+# That distinction is load-bearing: the M580 wire attaches to the CPU that owns ETH1, not to the rack
+# root, and the RevPi's attaches to its NIC rather than to the workstation.
+topology:
+  # Nodes that are not deployment targets. A target is already a node - it is named by its plc.
+  nodes:
+    - id: Switch_1
+      equipment: 11111111-2222-3333-4444-000000000060
+      template: Equipment_Switch.json
+      emit: true
+
+  links:
+    - identifier: M262_to_Switch1
+      from: { node: M262,    endpoint: equipment, port: Ethernet1 }
+      to:   { node: Switch_1, endpoint: equipment, port: Port1 }
+    - identifier: Switch1_to_M580
+      from: { node: Switch_1, endpoint: equipment, port: Port2 }
+      # ETH1 is declared on the CPU, not on the rack the CPU sits in.
+      to:   { node: M580,    endpoint: cpu,       port: ETH1 }
+    # The BX1 daisy-chain: switch -> EtherNet/IP coupler -> panel.
+    - identifier: Switch1_to_EtherNetIP
+      from: { node: Switch_1, endpoint: equipment,  port: Port3 }
+      to:   { node: BX1,     endpoint: etherNetIp, port: Port2 }
+    - identifier: EtherNetIP_to_BX1
+      from: { node: BX1,     endpoint: etherNetIp, port: Port1 }
+      to:   { node: BX1,     endpoint: equipment,  port: LAN1 }
+    # Emitted only when this run relocates something onto the RevPi, because that is when its device
+    # exists at all; a wire to a device that was not emitted makes EAE reject the whole topology.
+    - identifier: RevPi_to_Switch1
+      from: { node: RevPi,   endpoint: nic,       port: Port1 }
+      to:   { node: Switch_1, endpoint: equipment, port: Port4 }
+      requiresRelocation: true
