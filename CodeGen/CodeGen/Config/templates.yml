@@ -153,6 +153,13 @@ templates:
       stateDataSource: FB1.Status
       initSource: StateHandling.INITO
       topicNameSource: name
+    # It answers an addressed request by re-sampling and reporting even when the level has not
+    # changed, so a recipe asks before it waits. addressBy is componentName because the ring's claim
+    # test is a case-sensitive compare against the `name` this type is parameterised with - the
+    # lower-cased ring key would circle unclaimed. See Docs/PATCH_RATIONALES P-3.
+    refresh:
+      command: 0
+      addressBy: componentName
 
   - name: Process1_Generic
     infraRoles: [processCat]
