@@ -161,23 +161,23 @@ namespace CodeGen.Services
         static string BuildEmptySyslay(Configuration.CompilerConfiguration cfg, string path) =>
             TemplateDocument.Load(cfg, @"Clean\Empty.syslay", new Dictionary<string, string>
             {
-                ["LayerId"] = TryReadAttr(path, "Layer", "ID") ?? "00000000-0000-0000-0000-000000000000",
+                ["LayerId"] = TryReadAttr(path, "Layer", "ID") ?? Artefacts.EaeAbi.NullUuid,
             });
 
         static string BuildEmptySysres(Configuration.CompilerConfiguration cfg, string path) =>
             TemplateDocument.Load(cfg, @"Clean\Empty.sysres", new Dictionary<string, string>
             {
-                ["ResourceId"]   = TryReadAttr(path, "Resource", "ID")        ?? "00000000-0000-0000-0000-000000000000",
+                ["ResourceId"]   = TryReadAttr(path, "Resource", "ID")        ?? Artefacts.EaeAbi.NullUuid,
                 ["ResourceName"] = TryReadAttr(path, "Resource", "Name")      ?? "RES0",
-                ["ResourceType"] = TryReadAttr(path, "Resource", "Type")      ?? "EMB_RES_ECO",
-                ["Namespace"]    = TryReadAttr(path, "Resource", "Namespace") ?? "Runtime.Management",
+                ["ResourceType"] = TryReadAttr(path, "Resource", "Type")      ?? Artefacts.EaeAbi.EmbeddedResourceType,
+                ["Namespace"]    = TryReadAttr(path, "Resource", "Namespace") ?? Artefacts.EaeAbi.RuntimeNamespace,
             });
 
         // Clean BLANKS the application name (the template carries Name=""); Test Runtime restores "WMG".
         static string BuildEmptySysapp(Configuration.CompilerConfiguration cfg, string path) =>
             TemplateDocument.Load(cfg, @"Clean\Empty.sysapp", new Dictionary<string, string>
             {
-                ["AppId"] = TryReadAttr(path, "Application", "ID") ?? "00000000-0000-0000-0000-000000000001",
+                ["AppId"] = TryReadAttr(path, "Application", "ID") ?? Artefacts.EaeAbi.ApplicationId,
             });
 
         static string? TryReadAttr(string path, string elementLocalName, string attrName)
