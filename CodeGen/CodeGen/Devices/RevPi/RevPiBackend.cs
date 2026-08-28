@@ -17,8 +17,9 @@ namespace CodeGen.Devices.RevPi
         public RevPiBackend(PlcAssignment target) => Target = target;
 
         // Its Modbus coupler reads a fixed set of signals, so only those components have IO here.
-        public override System.Collections.Generic.IReadOnlySet<string> ServableComponents =>
-            RevPiIoBrokerInjector.CoveredComponents;
+        public override System.Collections.Generic.IReadOnlySet<string> ServableComponents(
+            Configuration.CompilerConfiguration cfg) =>
+            RevPiIoBrokerInjector.CoveredComponents(cfg);
 
         // Its Modbus coupler carries a fixed set of channels, so a component assigned here that the
         // coupler cannot read would deploy with no IO and could never actuate. That is this target's
@@ -28,7 +29,7 @@ namespace CodeGen.Devices.RevPi
             if (!ctx.Profile.AssignsAnythingTo(Target)) return;
             var assigned = ctx.Profile.Assignments
                 .Where(kv => kv.Value == Target).Select(kv => kv.Key).ToList();
-            Validation.Plan.RevPiSelectionValidator.ThrowIfInvalid(ctx.Profile, ctx.IoBearing(assigned));
+            Validation.Plan.RevPiSelectionValidator.ThrowIfInvalid(ctx.Cfg, ctx.Profile, ctx.IoBearing(assigned));
         }
 
         public override void EmitDevice(GenerationContext ctx, DeviceScope scope, Action<string> log)
@@ -37,7 +38,7 @@ namespace CodeGen.Devices.RevPi
             Stage("device emit", log, () =>
             {
                 var report = new SystemInjector.BindingApplicationReport();
-                RevPiDeviceEmitter.EmitDevice(ctx, report);
+                RevPiDeviceEmitter.EmitDevice(ctx, Target, report);
                 foreach (var m in report.Missing) log(m);
             });
         }
@@ -46,7 +47,7 @@ namespace CodeGen.Devices.RevPi
             SystemInjector.BindingApplicationReport report, Action<string> log)
         {
             if (!ctx.Profile.HasAssignments) return;
-            Stage("resource wire", log, () => RevPiDeviceEmitter.WireResource(ctx, report));
+            Stage("resource wire", log, () => RevPiDeviceEmitter.WireResource(ctx, Target, report));
         }
     }
 }
