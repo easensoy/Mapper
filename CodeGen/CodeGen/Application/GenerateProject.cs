@@ -57,9 +57,13 @@ namespace CodeGen.Application
         // One backend per DECLARED target, in the declared drive order. A kind nothing implements and a
         // drive order that does not name every target both stop the run here, before anything is
         // planned - a target silently left undriven emits no device and the run still reports success.
-        public static CodeGen.Devices.ITargetBackend[] Backends()
+        //
+        // The declarations are the RUN'S OWN snapshot, never a process-wide one. Two runs holding
+        // different bundles must compose different backend sets; reading a singleton here handed the
+        // second run the first run's targets while every other stage used its own.
+        public static CodeGen.Devices.ITargetBackend[] Backends(Configuration.CompilerConfiguration cfg)
         {
-            var declared = Configuration.DeviceConfig.Current;
+            var declared = (cfg ?? throw new ArgumentNullException(nameof(cfg))).Devices;
             var byPlc = declared.Targets.ToDictionary(t => t.Plc);
             var order = declared.BackendEmitOrder;
 
@@ -91,8 +95,8 @@ namespace CodeGen.Application
 
             // ONE SESSION for this run: the declarations, the plan and the backends that will emit
             // it, decided here and handed down. Nothing below reaches a global for any of them.
-            var session = CompilerSession.Begin(
-                Configuration.CompilerConfiguration.Load(request.Config.Clone()), Backends());
+            var declarations = Configuration.CompilerConfiguration.Load(request.Config.Clone());
+            var session = CompilerSession.Begin(declarations, Backends(declarations));
 
             // Work on a copy: MapperUI keeps one config for the process lifetime, so mutation leaks between runs.
             // THE CONFIGURATION COMPOSITION ROOT. Every declaration file is read ONCE, here, and one
@@ -141,7 +145,7 @@ namespace CodeGen.Application
             PortNameValidator.AssertContractMatchesArchives(cfg.Paths.TemplateLibraryPath, cfg.Manifest);
 
             DeepClean(cfg, log);
-            LogFeedSysdevState(cfg, log);
+            LogSysdevState(cfg, log);
 
             var injector = new SystemInjector();
             foreach (var finding in ctx.SemanticFindings) log($"[Semantics] {finding}");
@@ -270,13 +274,18 @@ namespace CodeGen.Application
         }
 
         // An existing .sysdev is preserved to keep its trust binding, an absent one is bootstrapped.
-        static void LogFeedSysdevState(Configuration.CompilerConfiguration cfg, Action<string> log)
+        // Reported for every declared device rather than one named controller: which of them EAE already
+        // holds a binding against is a fact about the tree, not about which target the plant feeds from.
+        static void LogSysdevState(Configuration.CompilerConfiguration cfg, Action<string> log)
         {
-            var exists = false;
-            try { exists = M262SysdevEmitter.M262SysdevAlreadyExists(cfg); } catch { }
-            log(exists
-                ? "[Device] M262 sysdev present — preserved (trust binding intact)."
-                : "[Device] M262 sysdev absent — Mapper will bootstrap the M262 logical device from scratch.");
+            foreach (var t in cfg.Targets.All)
+            {
+                var exists = false;
+                try { exists = M262SysdevEmitter.SysdevAlreadyExists(cfg, t.Plc); } catch { }
+                log(exists
+                    ? $"[Device] {t.Plc} sysdev present — preserved (trust binding intact)."
+                    : $"[Device] {t.Plc} sysdev absent — the Mapper will bootstrap it from scratch.");
+            }
         }
 
         static void DeployTemplates(GenerationContext ctx, Action<string> log)
@@ -480,7 +489,7 @@ namespace CodeGen.Application
                 var eae = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
                 if (!string.IsNullOrEmpty(eae))
                 {
-                    var n = OpcuaCompanionEmitter.EnsureOpcuaInAllResourceFolders(eae);
+                    var n = OpcuaCompanionEmitter.EnsureOpcuaInAllResourceFolders(cfg, eae);
                     log($"[Artefacts] opcua.xml companions ensured: {n} created");
                 }
             }
