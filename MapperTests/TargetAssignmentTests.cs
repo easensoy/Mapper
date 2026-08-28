@@ -60,7 +60,7 @@ namespace MapperTests
         {
             // A hardware contract of the TARGET, declared beside its addresses - so assigning one
             // component can legitimately bring others with it, and the profile says which.
-            var target = TestConfig.Cfg.Targets.All.First(t => t.ReceivesRelocatedComponents).Plc;
+            var target = TestConfig.Cfg.Targets.All.First(t => t.StandsInFor != null).Plc;
             var required = DeviceConfig.Current.AlwaysHostedBy(target);
             var profile = DeploymentProfile.Relocating(new[] { "Feeder" }, TestConfig.Cfg);
 
@@ -79,7 +79,7 @@ namespace MapperTests
             Assert.Equal(typeof(IReadOnlySet<string>), property!.PropertyType);
 
             var profile = DeploymentProfile.Relocating(new[] { "Feeder", "Checker" }, TestConfig.Cfg);
-            var target = TestConfig.Cfg.Targets.All.First(t => t.ReceivesRelocatedComponents).Plc;
+            var target = TestConfig.Cfg.Targets.All.First(t => t.StandsInFor != null).Plc;
             Assert.Equal(target, profile.AssignedTarget("Feeder"));
             Assert.Equal(target, profile.AssignedTarget("Checker"));
             Assert.Null(profile.AssignedTarget("Clamp"));
