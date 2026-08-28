@@ -112,9 +112,12 @@ namespace MapperTests
         public void RevPi_selection_never_moves_M580_or_BX1_components()
         {
             var before = Roster(M262).All
+                // Neither the target work moves OFF nor the one it moves ONTO: the pair is one declared
+                // relationship, so this reads both ends of it rather than two independent flags.
                 .Where(e => TestConfig.Cfg.Targets.IsRegistered(e.Plc) &&
-                            e.Plc != TestConfig.Cfg.Targets.FeedTarget &&
-                            !TestConfig.Cfg.Targets.Of(e.Plc).ReceivesRelocatedComponents)
+                            TestConfig.Cfg.Targets.RingMembers(
+                                TestConfig.Cfg.Targets.RingHostOf(TestConfig.Cfg.Targets.Of(e.Plc)))
+                                .Count == 1)
                 .ToDictionary(e => e.Name, e => e.Plc, StringComparer.Ordinal);
 
             var after = Roster(RevPiComponents("Feeder", "Checker", "PartInHopper"));
@@ -161,21 +164,21 @@ namespace MapperTests
         public void Default_M262_selection_raises_no_problems()
         {
             var profile = M262;
-            Assert.Empty(RevPiSelectionValidator.Validate(profile, profile.Assignments.Keys.ToList()));
+            Assert.Empty(RevPiSelectionValidator.Validate(TestConfig.Cfg, profile, profile.Assignments.Keys.ToList()));
         }
 
         [Fact]
         public void Supported_per_component_swap_raises_no_problems()
         {
             var profile = RevPiComponents("Feeder", "Checker", "PartInHopper");
-            Assert.Empty(RevPiSelectionValidator.Validate(profile, profile.Assignments.Keys.ToList()));
+            Assert.Empty(RevPiSelectionValidator.Validate(TestConfig.Cfg, profile, profile.Assignments.Keys.ToList()));
         }
 
         [Fact] // a component with no Modbus signal would deploy unable to actuate
         public void Routing_an_uncovered_component_to_the_RevPi_is_rejected()
         {
             var profile = RevPiComponents("Transfer");
-            var problems = RevPiSelectionValidator.Validate(profile, profile.Assignments.Keys.ToList());
+            var problems = RevPiSelectionValidator.Validate(TestConfig.Cfg, profile, profile.Assignments.Keys.ToList());
             Assert.NotEmpty(problems);
             Assert.Contains(problems, p => p.Contains("Transfer", StringComparison.Ordinal));
         }
@@ -185,7 +188,7 @@ namespace MapperTests
         {
             Assert.Equal(
                 new[] { "Checker", "Feeder", "PartInHopper" },
-                RevPiIoBrokerInjector.CoveredComponents.OrderBy(n => n, StringComparer.Ordinal).ToArray());
+                RevPiIoBrokerInjector.CoveredComponents(TestConfig.Cfg).OrderBy(n => n, StringComparer.Ordinal).ToArray());
         }
     }
 
@@ -368,7 +371,7 @@ namespace MapperTests
             var text = File.ReadAllText(hcf);
             Assert.Contains("Modbus", text, StringComparison.OrdinalIgnoreCase);
             // The .hcf LinkNames resolve against the broker FB id, so the two must agree.
-            Assert.Contains(RevPiIoBrokerInjector.BrokerFbId, text, StringComparison.Ordinal);
+            Assert.Contains(RevPiIoBrokerInjector.BrokerFbId(TestConfig.Cfg), text, StringComparison.Ordinal);
         }
 
         [Fact] // device.yml is the deployed source of the RevPi addresses
