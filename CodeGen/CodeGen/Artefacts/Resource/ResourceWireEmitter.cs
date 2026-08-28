@@ -85,7 +85,7 @@ namespace CodeGen.Devices.Core
 
                 // This is the LAST writer of every sysres, so a relocated component left here is duplicated
                 // across two resources. See Docs/PATCH_RATIONALES P-6.
-                if (ctx.Profile.HasAssignments && !plan.Capabilities.ReceivesRelocatedComponents)
+                if (ctx.Profile.HasAssignments && !plan.Capabilities.StandsInForAnother)
                 {
                     var relocated = ctx.Profile.Assignments.Keys;
                     var dropFbs = fbNet.Elements(ns + "FB")
