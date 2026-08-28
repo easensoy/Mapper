@@ -11,15 +11,18 @@ namespace CodeGen.Devices.BX1
     // project; authoritative final pass so the config survives the wiper's empty-shell reset.
     public static class BX1HwConfigCopier
     {
-        public static HwConfigCopyResult Copy(Configuration.CompilerConfiguration cfg)
+        // The target is the one whose backend is running, not a named controller: the scanner model
+        // belongs to whichever device declares an EtherNet/IP coupler.
+        public static HwConfigCopyResult Copy(Configuration.CompilerConfiguration cfg,
+            CodeGen.Translation.PlcAssignment target)
         {
-            var copied = HwConfigVerbatimCopier.CopyFor(cfg, CodeGen.Translation.PlcAssignment.Named("BX1"),
+            var copied = HwConfigVerbatimCopier.CopyFor(cfg, target,
                 Station2DeviceEmitter.ResolveBx1HcfPath(cfg));
             // Must run AFTER HwConfiguration/ is rebuilt: an in-EmitAll deploy no-ops here, leaving an
             // EMPTY EIPSCANNER2.xml so the cover I/O never reaches the coupler.
-            Station2DeviceEmitter.DeployBx1ScannerModelFinalPass(cfg);
+            Station2DeviceEmitter.DeployBx1ScannerModelFinalPass(cfg, target);
             // Abort the Generate if the scanner model did not land (empty scanner = dead covers).
-            Station2DeviceEmitter.ValidateBx1ScannerModelOrThrow(cfg);
+            Station2DeviceEmitter.ValidateBx1ScannerModelOrThrow(cfg, target);
             return copied;
         }
     }
