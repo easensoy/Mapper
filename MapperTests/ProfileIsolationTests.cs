@@ -186,5 +186,182 @@ namespace MapperTests
             Assert.NotEmpty(good.Targets.All);
             Assert.Equal(TestConfig.Cfg.Targets.All[0].ResourceName, good.Targets.All[0].ResourceName);
         }
+
+        // ------------------------------------------------------------------------------------
+        // The four things a run must not inherit: its BACKENDS, its IO, its TELEMETRY, its BROKER.
+        //
+        // Each of these was resolved from a process-wide read rather than from the run's own snapshot,
+        // so the first run through decided the answer for every later one. The tests below run two
+        // profiles SEQUENTIALLY in one process — the exact shape that hid the defect — and require the
+        // second to answer from its own bundle.
+        // ------------------------------------------------------------------------------------
+
+        [Fact]
+        public void Two_sequential_runs_compose_backends_from_their_own_declarations()
+        {
+            // `Backends()` read the device declaration singleton while every other stage used the run's
+            // snapshot, so a second profile got its own targets everywhere except here.
+            var a = Load(Bundle("bk_a"));
+            var b = Load(Bundle("bk_b", "device.yml",
+                y => y.Replace("backendEmitOrder: [M262, RevPi, M580, BX1]",
+                               "backendEmitOrder: [BX1, M580, RevPi, M262]")));
+
+            var first = TargetBackends.For(a).Select(x => x.Target.ToString()).ToArray();
+            var second = TargetBackends.For(b).Select(x => x.Target.ToString()).ToArray();
+
+            Assert.Equal(new[] { "M262", "RevPi", "M580", "BX1" }, first);
+            Assert.Equal(new[] { "BX1", "M580", "RevPi", "M262" }, second);
+
+            // And back again: the first profile is not left holding the second's order.
+            Assert.Equal(first, TargetBackends.For(a).Select(x => x.Target.ToString()).ToArray());
+        }
+
+        [Fact]
+        public void Two_sequential_runs_resolve_telemetry_from_their_own_declarations()
+        {
+            var a = Load(Bundle("tel_a"));
+            var b = Load(Bundle("tel_b", "telemetry.yml", y => y.Replace("topicRoot: smc", "topicRoot: other")));
+
+            Assert.Equal("smc", a.Telemetry.TopicRoot);
+            Assert.Equal("other", b.Telemetry.TopicRoot);
+            Assert.Equal("smc", a.Telemetry.TopicRoot);
+        }
+
+        // A snapshot whose workbook path points nowhere. The coupler cross-checks the coupler type
+        // against the workbook, so the workbook is the half a run genuinely owns: the template library
+        // is additionally discoverable from the working tree, which is what lets a test find it at all.
+        CompilerConfiguration WithoutWorkbook(string label)
+        {
+            var paths = TestConfig.Cfg.Paths.Clone();
+            paths.IoBindingsPath = Path.Combine(
+                Path.GetTempPath(), "no_such_workbook_" + Guid.NewGuid().ToString("N")[..8] + ".xlsx");
+            return CompilerConfiguration.Load(paths, Bundle(label));
+        }
+
+        [Fact]
+        public void Two_sequential_runs_resolve_the_io_broker_from_their_own_declarations()
+        {
+            // The coupler was memoised on first touch from whatever configuration happened to be beside
+            // the DLL. A run whose own declarations cannot resolve it must FAIL rather than be handed
+            // the previous run's signals - which is exactly what a memoised answer did.
+            var a = Load(Bundle("io_a"));
+            var covered = CodeGen.Devices.RevPi.RevPiIoBrokerInjector.CoveredComponents(a);
+            Assert.NotEmpty(covered);
+
+            Assert.ThrowsAny<Exception>(() =>
+                CodeGen.Devices.RevPi.RevPiIoBrokerInjector.CoveredComponents(WithoutWorkbook("io_b")));
+
+            // The first profile still answers, and answers the same as before.
+            Assert.Equal(covered.OrderBy(n => n, StringComparer.Ordinal).ToArray(),
+                CodeGen.Devices.RevPi.RevPiIoBrokerInjector.CoveredComponents(a)
+                    .OrderBy(n => n, StringComparer.Ordinal).ToArray());
+        }
+
+        [Fact]
+        public void A_targets_servable_set_follows_the_run_that_asked()
+        {
+            // The UI, the selection validator and the run all ask the BACKEND what a target can serve.
+            // Stored on the backend it was resolved once per process; asked of a snapshot it is the
+            // answer for that snapshot, which is what makes the three views agree per run.
+            var a = Load(Bundle("srv_a"));
+            var relocation = a.Targets.All.First(t => t.StandsInFor != null).Plc;
+            var backend = TargetBackends.For(a).First(x => x.Target == relocation);
+
+            Assert.NotEmpty(backend.ServableComponents(a));
+
+            // Same backend instance, different snapshot: the answer follows the argument, not the object.
+            Assert.ThrowsAny<Exception>(() => backend.ServableComponents(WithoutWorkbook("srv_b")));
+            Assert.NotEmpty(backend.ServableComponents(a));
+        }
+
+        // ------------------------------------------------------------------------------------
+        // A SECOND CONTROLLER OF AN EXISTING KIND IS A ROW, NOT A CLASS.
+        //
+        // Every device emitter used to read its ids through a static keyed on a controller NAME, so a
+        // second target of the same kind could only ever be emitted with the first one's sysdev,
+        // resource and equipment ids - three identities EAE requires to be unique per device. It would
+        // have generated, and then collided on import with nothing to say why.
+        // ------------------------------------------------------------------------------------
+
+        // A second target of an existing backend kind, with its own identities and its own resource.
+        const string SecondM580 = @"
+  - plc: M580b
+    backendKind: M580
+    network:
+      targetIp: 192.168.1.21
+    deviceName: M580b
+    identity:
+      sysdev: 00000000-0000-0000-0000-000000000007
+      resource: 3E5C2B7F1A4D6C8F
+      equipment: 11111111-2222-3333-4444-000000000070
+      runtime: 11111111-2222-3333-4444-000000000071
+      runtimeType: 7fd313c7-1da3-4618-9a5d-9ff3596aff7f
+      rack: 11111111-2222-3333-4444-000000000072
+      cps: 11111111-2222-3333-4444-000000000073
+      cpu: 11111111-2222-3333-4444-000000000074
+    simulationDeployPort: 51600
+    simulationArchivePort: 51601
+    resourceName: RES1
+    deviceType: M580_dPAC
+    hcfTemplate: M580IO.hcf
+    deviceLocalCanvas: true
+    bootFbs:
+      - { role: FB1, id: 66C40EEF3F39D96A }
+      - { role: FB2, id: ACED009B79DFCE6A }
+";
+
+        static string WithSecondM580(string yml) =>
+            yml.Replace("backendEmitOrder: [M262, RevPi, M580, BX1]",
+                        "backendEmitOrder: [M262, RevPi, M580, M580b, BX1]")
+               .Replace("\ntargets:\n", "\ntargets:\n" + SecondM580);
+
+        [Fact]
+        public void Two_targets_of_one_backend_kind_each_carry_their_own_identity()
+        {
+            var cfg = Load(Bundle("twokind", "device.yml", WithSecondM580));
+
+            var first = cfg.Targets.All.First(t => t.Plc.Name == "M580");
+            var second = cfg.Targets.All.First(t => t.Plc.Name == "M580b");
+
+            // Same KIND, so the same emitter renders both...
+            var backends = TargetBackends.For(cfg);
+            Assert.Equal(5, backends.Count);
+            var b1 = backends.First(b => b.Target == first.Plc);
+            var b2 = backends.First(b => b.Target == second.Plc);
+            Assert.Equal(b1.GetType(), b2.GetType());
+            Assert.NotSame(b1, b2);
+
+            // ...and every identity that reaches an artefact is its OWN.
+            Assert.NotEqual(first.Identity.Sysdev, second.Identity.Sysdev);
+            Assert.NotEqual(first.Identity.Resource, second.Identity.Resource);
+            Assert.NotEqual(first.Identity.Equipment, second.Identity.Equipment);
+            Assert.NotEqual(first.Identity.Runtime, second.Identity.Runtime);
+            Assert.NotEqual(first.Identity.Cpu, second.Identity.Cpu);
+            Assert.NotEqual(first.ResourceName, second.ResourceName);
+            Assert.NotEqual(first.SimulationDeployPort, second.SimulationDeployPort);
+
+            // Its boot ids are its own too: a shared boot id is a duplicate-key load failure in EAE.
+            Assert.Empty(cfg.Targets.BootFor(first.Plc, cfg.Layout)
+                .Select(b => b.Id)
+                .Intersect(cfg.Targets.BootFor(second.Plc, cfg.Layout).Select(b => b.Id)));
+
+            // And the shipped profile is unaffected: adding a row to one bundle changes no other.
+            Assert.Equal(4, TestConfig.Cfg.Targets.All.Count);
+        }
+
+        [Fact]
+        public void A_second_target_reusing_another_targets_identity_is_refused()
+        {
+            // The whole point of per-target identities is that they are unique. Two devices claiming one
+            // sysdev is a project EAE cannot load, so it is refused at load rather than emitted.
+            var clash = WithSecondM580(File.ReadAllText(
+                Path.Combine(AppContext.BaseDirectory, "Config", "device.yml")))
+                .Replace("sysdev: 00000000-0000-0000-0000-000000000007",
+                         "sysdev: 00000000-0000-0000-0000-000000000003");
+
+            var ex = Assert.ThrowsAny<Exception>(() =>
+                Load(Bundle("clash", "device.yml", _ => clash)));
+            Assert.Contains("sysdev", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
     }
 }
