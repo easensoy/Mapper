@@ -42,13 +42,14 @@ namespace CodeGen.Translation
         // Sysres canvas is device-local, so FBs translate to a local origin (the app canvas stays global).
         bool DeviceLocalCanvas,
         // Receives components relocated off another controller, so they must NOT be swept from its sysres.
-        bool ReceivesRelocatedComponents,
-        // Hands the cover detour out to another controller, so its ring closes across the seam.
-        bool OpensCoverSeam,
-        // Carries the cover chain itself, open at both ends because another controller commands it.
-        bool CarriesDetouredChain,
-        // Hosts the Feed ring, so a merged ring closes through its own seam.
-        bool HostsFeedRing);
+        bool StandsInForAnother,
+        // Commands a chain another resource carries, so this ring closes across the seam, not locally.
+        bool CommandsACarriedChain,
+        // Carries a chain itself, open at both ends because another resource commands it.
+        bool CarriesACommandedChain,
+        // Anchors the ring a merged topology closes through: the ring the cross-controller segment
+        // reports onto. Which ring that is comes from where the plan put the segment, not from a flag.
+        bool AnchorsMergedRing);
 
     // One actuator instance's motion contract. Sensed means a real arrival DI closes the wait;
     // timed means the CAT acknowledges after the leg's own duration.
@@ -131,9 +132,23 @@ namespace CodeGen.Translation
         public bool IsDetoured(string? name) =>
             DetouredChain.Any(c => string.Equals(c, name, StringComparison.OrdinalIgnoreCase));
 
-        // Feed-controller nodes the discharge tail splices into the assembly ring, in order. The syslay and
+        // Nodes the discharge tail splices into another controller's ring, in order. The syslay and
         // the sysres must exclude exactly the same names, else a node gets two sources on one stateRprtCmd_in.
         public IReadOnlyList<string> CrossRingSegment { get; }
+
+        // THE RING A MERGED TOPOLOGY CLOSES THROUGH, asked of the plan rather than declared.
+        //
+        // When every ring folds into one the seam has to close somewhere, and the somewhere is the ring
+        // the cross-controller segment reports ONTO - the segment is hosted there and hands the chain on
+        // from there. That used to be a `hostsFeedStation` flag on one target, which named a station in
+        // one plant and had to be kept in step with where the segment was actually allocated; a run that
+        // moved the segment would have closed the seam on a ring it no longer reached.
+        //
+        // Unknown when nothing crosses: with no segment there is no seam to close.
+        public PlcAssignment SegmentRingHost =>
+            CrossRingSegment.Count == 0
+                ? PlcAssignment.Unknown
+                : Targets.RingHostOf(Targets.Of(Allocation.Of(CrossRingSegment[0])));
 
         // Reporters this deployment injects that the twin does not declare, and that this run actually
         // emits. An injected reporter rides the cross-controller segment, so without that segment there
@@ -146,6 +161,17 @@ namespace CodeGen.Translation
                     .Where(n => !Station.Sensors.Concat(Station.Actuators)
                         .Any(c => string.Equals(c.Name?.Trim(), n, StringComparison.OrdinalIgnoreCase)))
                     .Where(Roster.Contains).ToList();
+
+        // The same reporters joined to the slot each one takes, in DECLARATION order - which is
+        // emission order. A reporter whose layout row gives it no stable slot has nowhere to report,
+        // so it is not emitted. The emitter asks the plan for both halves rather than re-deriving the
+        // slot from a configuration global, which is how the two used to be able to disagree.
+        public IReadOnlyList<(string Name, int Slot)> InjectedReporterRows =>
+            Cfg.Rig.SynthSensors
+                .Select(s => (s.Name, Slot: Layout.StableSlotOf(s.Name)))
+                .Where(r => r.Slot >= 0 &&
+                            InjectedReporters.Contains(r.Name, StringComparer.OrdinalIgnoreCase))
+                .ToList();
 
         // state_table slot the top-cover sensor reports on; see StateTableAllocation for why it is computed.
 
@@ -176,7 +202,7 @@ namespace CodeGen.Translation
             if (profile.HasAssignments) return;                    // every declared target is emitted
             var absent = profile.Layout.Resources
                 .Select(r => r.Plc)
-                .Where(plc => targets.Of(plc).ReceivesRelocatedComponents)
+                .Where(plc => targets.Of(plc).StandsInFor != null)
                 .ToHashSet();
             if (absent.Count == 0) return;
 
@@ -262,19 +288,19 @@ namespace CodeGen.Translation
 
         // Topology role per controller, decided here and never from the resource Label, which is display
         // text. Feed may be hosted by M262 or, under a partial swap, by the RevPi.
-        private ResourceCapabilities CapabilitiesOf(PlcAssignment plc)
+        public ResourceCapabilities CapabilitiesOf(PlcAssignment plc)
         {
             var target = Targets.Of(plc);
             return new ResourceCapabilities(
-                DeviceLocalCanvas:           target.DeviceLocalCanvas,
-                ReceivesRelocatedComponents: target.ReceivesRelocatedComponents,
-                // Only when the covers actually detour, and only from the target that hands them out.
-                OpensCoverSeam:              DetouredChain.Count > 0 && target.OpensCoverSeam,
+                DeviceLocalCanvas:      target.DeviceLocalCanvas,
+                StandsInForAnother:     target.StandsInFor != null,
+                // Only when a chain actually detours, and only onto the target that commands it.
+                CommandsACarriedChain:  DetouredChain.Count > 0 && Targets.CommandsACarriedChain(target.Plc),
                 // Open at both ends either because another controller commands the chain, or because
                 // this run relocated components here and their own process stayed where it was.
-                CarriesDetouredChain:        target.CarriesDetouredChain ||
-                                             (target.ReceivesRelocatedComponents && Profile.HasAssignments),
-                HostsFeedRing:               target.HostsFeedStation && Mapping.TargetIndex.OwnsRing(target));
+                CarriesACommandedChain: target.ChainCommandedBy != null ||
+                                        (target.StandsInFor != null && Profile.HasAssignments),
+                AnchorsMergedRing:      Mapping.TargetIndex.OwnsRing(target) && SegmentRingHost == target.Plc);
         }
 
         // Whether this run emits a resource for that target at all. A target that only exists when
@@ -282,7 +308,7 @@ namespace CodeGen.Translation
         // be written to a device the run never creates.
         public bool Emits(PlcAssignment plc) =>
             Targets.IsRegistered(plc) &&
-            (!Targets.Of(plc).ReceivesRelocatedComponents || Profile.HasAssignments);
+            (Targets.Of(plc).StandsInFor == null || Profile.HasAssignments);
 
         private static readonly Dictionary<string, string> EmptyParameters = new(StringComparer.Ordinal);
 
@@ -408,7 +434,7 @@ namespace CodeGen.Translation
             // declares that capability; nothing here names a controller.
             var carried = new HashSet<PlcAssignment>(
                 profile.Layout.Resources
-                    .Where(r => config.Targets.Of(r.Plc).CarriesDetouredChain)
+                    .Where(r => config.Targets.Of(r.Plc).ChainCommandedBy != null)
                     .Select(r => r.Plc));
             var detouredChain = station.Actuators
                 .Select(a => (a.Name ?? string.Empty).Trim())
