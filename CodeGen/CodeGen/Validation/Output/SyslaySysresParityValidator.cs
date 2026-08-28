@@ -150,14 +150,15 @@ namespace CodeGen.Devices.Core
                 }
             }
 
-            // With the cross-PLC discharge tail active the Feed controller's IO must carry it: on M262 the
-            // four .hcf channels, on RevPi the discharge FBs hosted on the RevPi sysres.
+            // With the cross-controller discharge tail active, the IO of the target that segment
+            // reports onto must carry it: either its declared .hcf channels or the FBs on its sysres.
             if (ctx.CrossRingSegment.Count > 0)
-                ValidateDischargeHcf(ctx.Cfg.Rig, eaeRoot, violations, ctx.Targets);
+                ValidateDischargeHcf(ctx.Cfg.Rig, eaeRoot, violations,
+                    ctx.Targets.Of(ctx.SegmentRingHost));
 
-            // Independent of the discharge tail, which stays on the M262 that owns its channels.
+            // Independent of the discharge tail, which stays on the target that owns its channels.
             if (ctx.Profile.HasAssignments)
-                ValidateRevPiIo(eaeRoot, syslayPath, violations, ctx.Targets);
+                ValidateRevPiIo(ctx.Cfg, eaeRoot, syslayPath, violations, ctx.Targets);
 
             return violations;
         }
@@ -173,12 +174,11 @@ namespace CodeGen.Devices.Core
             return d;
         }
 
-        // The discharge channels belong to whichever target HOSTS the feed station and is not the one
-        // that only receives relocated work - a capability, not a controller name.
+        // The discharge channels belong to the target the cross-controller segment reports onto -
+        // which the PLAN answers from where it allocated that segment, not a flag naming a station.
         static void ValidateDischargeHcf(RigCatalog rig, string eaeRoot, List<Violation> violations,
-            Mapping.TargetIndex targets)
+            TargetDescriptor host)
         {
-            var host = targets.Of(targets.FeedTarget);
             var sysdev = EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, host.DeviceType);
             if (string.IsNullOrEmpty(sysdev))
             {
@@ -225,7 +225,7 @@ namespace CodeGen.Devices.Core
         // The one target declared to receive components relocated off another. Asked for by that
         // capability so a project with a different relocation host needs no edit here.
         static TargetDescriptor RelocationTarget(Mapping.TargetIndex targets) =>
-            targets.All.FirstOrDefault(t => t.ReceivesRelocatedComponents)
+            targets.All.FirstOrDefault(t => t.StandsInFor != null)
             ?? throw new InvalidOperationException(
                 "device.yml declares no target that receives relocated components, so a relocated " +
                 "deployment cannot be validated.");
@@ -270,10 +270,11 @@ namespace CodeGen.Devices.Core
 
         // RevPi Feed IO = the Modbus broker RevPI_IO on the sysres carrying a Mapping to a matching application
         // instance, plus the .hcf whose LinkNames resolve to it. Without all three the Feed IO does not bind.
-        static void ValidateRevPiIo(string eaeRoot, string syslayPath, List<Violation> violations,
+        static void ValidateRevPiIo(Configuration.CompilerConfiguration cfg,
+            string eaeRoot, string syslayPath, List<Violation> violations,
             Mapping.TargetIndex targets)
         {
-            var BrokerFbId = CodeGen.Devices.RevPi.RevPiIoBrokerInjector.BrokerFbId;
+            var BrokerFbId = CodeGen.Devices.RevPi.RevPiIoBrokerInjector.BrokerFbId(cfg);
             const string BrokerName = CodeGen.Devices.RevPi.RevPiIoBrokerInjector.BrokerName;
 
             var sysdev = EaeProjectLayout.FindSysdevByDeviceTypeAndName(
