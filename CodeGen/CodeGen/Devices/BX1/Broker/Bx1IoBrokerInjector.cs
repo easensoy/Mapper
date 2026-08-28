@@ -13,8 +13,10 @@ namespace CodeGen.Devices.BX1
     {
         static readonly XNamespace Ns = CodeGen.Devices.Core.Station2DeviceEmitter.LibElNs;
 
-        public static string BrokerFbId =>
-            Configuration.DeviceConfig.Identity(CodeGen.Translation.PlcAssignment.Named("BX1")).IoBrokerFb;
+        // The broker instance's frozen EAE id, read from the descriptor of the target that hosts it:
+        // keyed on the name "BX1" a second coupler-bearing device could only reuse the first one's id.
+        public static string BrokerFbIdOf(Configuration.CompilerConfiguration cfg, PlcAssignment target) =>
+            cfg.Targets.Of(target).Identity.IoBrokerFb;
         public const string BrokerFbName = "BX1_IO";
         public const string BrokerFbType = "PLC_RW_BX1";
 
@@ -207,11 +209,14 @@ namespace CodeGen.Devices.BX1
             return true;
         }
 
-        // SAFETY (cover safe-start): a Bx1CoverFailsafe gate forces the profile's
-        // safeStartComponent HOME on start and holds until its at-home sensor (input bit0). Fires only while the
-        // logic RUNS, NOT on EAE Clean/STOP/fault — homing while stopped needs the coupler fallback word 16#0002.
-        public static bool InjectCoverFailsafeIntoBrokerType(string eaeRoot)
+        // SAFETY (cover safe-start): a Bx1CoverFailsafe gate forces the safe-start actuator HOME on start
+        // and holds until its at-home sensor reports. Which actuator, which coils and which sensor bit are
+        // the resolved Bx1SafeStart the scanner validator also quotes — not bit numbers spelled here.
+        // Fires only while the logic RUNS, NOT on EAE Clean/STOP/fault — that needs the coupler fallback word.
+        public static bool InjectCoverFailsafeIntoBrokerType(
+            Configuration.CompilerConfiguration cfg, string eaeRoot)
         {
+            var plan = Bx1SafeStart.Resolve(cfg);
             var fbt = Path.Combine(eaeRoot, "IEC61499", "PLC_RW_BX1.fbt");
             if (!File.Exists(fbt)) return false;
             var doc = XDocument.Load(fbt);
@@ -234,26 +239,38 @@ namespace CodeGen.Devices.BX1
             var firstInput = net.Elements("Input").FirstOrDefault();
             if (firstInput != null) firstInput.AddBeforeSelf(fb); else net.Add(fb);
 
-            // Reroute each output bit's source through the gate, keyed on the bit dest (works for both bridge forms).
-            void Reroute(string bit, string fsIn, string fsOut)
+            // Reroute each declared coil's bit through the gate, keyed on the bit dest (works for both
+            // bridge forms). The gate's own pin names are its type's ABI, so they are read off the
+            // deployed type rather than spelled here; the bit each one carries is the declaration's.
+            var (drivePins, holdPins, sensorPin) = FailsafePins(eaeRoot);
+            if (drivePins.Count != 2 || sensorPin == null || holdPins.Count < plan.HeldOff.Count)
+                throw new InvalidOperationException(
+                    $"Bx1CoverFailsafe exposes {drivePins.Count} gated drive pins, {holdPins.Count} " +
+                    $"hold-off pins and {(sensorPin == null ? "no" : "one")} sensor pin, which cannot " +
+                    $"carry the declared safe-start ({plan.HeldOff.Count} coils to hold off).");
+
+            void Reroute(int bit, string fsIn, string fsOut)
             {
                 var conn = dc.Elements("Connection").FirstOrDefault(c =>
-                    (string?)c.Attribute("Destination") == "EIPOutput_Bits." + bit);
+                    (string?)c.Attribute("Destination") == "EIPOutput_Bits.bit" + bit);
                 if (conn == null) return;
                 var src = (string?)conn.Attribute("Source") ?? string.Empty;
                 conn.Remove();
                 dc.Add(new XElement("Connection", new XAttribute("Source", src),
                     new XAttribute("Destination", "CoverFailsafe." + fsIn)));
                 dc.Add(new XElement("Connection", new XAttribute("Source", "CoverFailsafe." + fsOut),
-                    new XAttribute("Destination", "EIPOutput_Bits." + bit)));
+                    new XAttribute("Destination", "EIPOutput_Bits.bit" + bit)));
             }
-            Reroute("bit0", "ToWork", "gToWork");
-            Reroute("bit1", "ToHome", "gToHome");
-            Reroute("bit2", "Vr", "gVr");
-            Reroute("bit3", "Grip", "gGrip");
+            // The safe actuator's own two coils first (the gate drives these), then everything it holds
+            // off, in word-bit order — the order the emitted DataConnections carry.
+            Reroute(plan.CoilToWork.Bit, drivePins[0].In, drivePins[0].Out);
+            Reroute(plan.CoilToHome.Bit, drivePins[1].In, drivePins[1].Out);
+            for (int i = 0; i < plan.HeldOff.Count; i++)
+                Reroute(plan.HeldOff[i].Signal.Bit, holdPins[i].In, holdPins[i].Out);
 
-            dc.Add(new XElement("Connection", new XAttribute("Source", "EIPInputs_Bool.bit0"),
-                new XAttribute("Destination", "CoverFailsafe.AtHome")));
+            dc.Add(new XElement("Connection",
+                new XAttribute("Source", "EIPInputs_Bool.bit" + plan.SensorFromHome.Bit),
+                new XAttribute("Destination", "CoverFailsafe." + sensorPin)));
 
             foreach (var c in ec.Elements("Connection")
                          .Where(c => (string?)c.Attribute("Destination") == "EIPOutput_Bits.REQ").ToList())
@@ -266,6 +283,35 @@ namespace CodeGen.Devices.BX1
             idc?.SetAttributeValue("Value", nextId.ToString());
             doc.Save(fbt);
             return true;
+        }
+
+        // The gate's interface, read off the deployed type. A gated pin is an InputVar with a matching
+        // g<Name> OutputVar; the remaining InputVar is the release sensor. The FIRST TWO gated pins are
+        // the ones the gate DRIVES (work then home) and the rest are held off — that pairing is the FB's
+        // own contract, declared by the order it lists them, so a gate with more coils needs no edit here.
+        static (System.Collections.Generic.List<(string In, string Out)> Drive,
+                System.Collections.Generic.List<(string In, string Out)> Hold,
+                string? Sensor) FailsafePins(string eaeRoot)
+        {
+            var drive = new System.Collections.Generic.List<(string, string)>();
+            var hold = new System.Collections.Generic.List<(string, string)>();
+            string? sensor = null;
+            var fbt = Path.Combine(eaeRoot, "IEC61499", "Bx1CoverFailsafe.fbt");
+            if (!File.Exists(fbt)) return (drive, hold, sensor);
+
+            var iface = XDocument.Load(fbt).Root?.Element("InterfaceList");
+            var outs = new System.Collections.Generic.HashSet<string>(
+                iface?.Element("OutputVars")?.Elements("VarDeclaration")
+                    .Select(v => (string?)v.Attribute("Name") ?? string.Empty) ?? Enumerable.Empty<string>(),
+                StringComparer.Ordinal);
+            foreach (var name in iface?.Element("InputVars")?.Elements("VarDeclaration")
+                         .Select(v => (string?)v.Attribute("Name") ?? string.Empty)
+                     ?? Enumerable.Empty<string>())
+            {
+                if (outs.Contains("g" + name)) (drive.Count < 2 ? drive : hold).Add((name, "g" + name));
+                else sensor ??= name;
+            }
+            return (drive, hold, sensor);
         }
 
         static void ApplyBrokerLayout(XElement net)
@@ -296,14 +342,15 @@ namespace CodeGen.Devices.BX1
         }
 
         // Injects the BX1_IO broker + cover symlink bridge into the BX1 SubApp (syslay) and sysres; returns files touched.
-        public static int InjectBx1IoBroker(Configuration.CompilerConfiguration cfg, string syslayPath,
+        public static int InjectBx1IoBroker(Configuration.CompilerConfiguration cfg, PlcAssignment target,
+            string syslayPath,
             SystemInjector.BindingApplicationReport report)
         {
             int touched = 0;
             try
             {
                 var bx1Sysres = FindBx1Sysres(cfg, syslayPath);
-                var resourceName = ReadResourceName(bx1Sysres) ?? cfg.Targets.Of(PlcAssignment.Named("BX1")).ResourceName;
+                var resourceName = ReadResourceName(bx1Sysres) ?? cfg.Targets.Of(target).ResourceName;
                 foreach (var (label, path, isSysres) in new[]
                 {
                     ("syslay", syslayPath,        false),
@@ -313,7 +360,7 @@ namespace CodeGen.Devices.BX1
                     if (string.IsNullOrEmpty(path) || !File.Exists(path)) continue;
                     try
                     {
-                        if (InjectInto(cfg, path, isSysres, label, resourceName, report)) touched++;
+                        if (InjectInto(cfg, target, path, isSysres, label, resourceName, report)) touched++;
                     }
                     catch (IOException)
                     {
@@ -337,7 +384,7 @@ namespace CodeGen.Devices.BX1
             return touched;
         }
 
-        static bool InjectInto(Configuration.CompilerConfiguration cfg, string path, bool isSysres,
+        static bool InjectInto(Configuration.CompilerConfiguration cfg, PlcAssignment target, string path, bool isSysres,
             string label, string resourceName, SystemInjector.BindingApplicationReport report)
         {
             var doc = XDocument.Load(path, LoadOptions.PreserveWhitespace);
@@ -352,7 +399,7 @@ namespace CodeGen.Devices.BX1
             var dc = net.Element(Ns + "DataConnections")  ?? AddSection(net, "DataConnections");
 
             // The broker FB (forced id so the copied .hcf matches).
-            AddBrokerFbIfAbsent(net, isSysres, isSysres ? 9500 : 32000, 5800);
+            AddBrokerFbIfAbsent(net, BrokerFbIdOf(cfg, target), isSysres, isSysres ? 9500 : 32000, 5800);
             if (hasGripper)
                 AddEvent(ec, $"{InitRootCover(cfg)}.INITO", $"{BrokerFbName}.INIT");
 
@@ -374,9 +421,11 @@ namespace CodeGen.Devices.BX1
 
                 // A composite has no path to a sibling instance's event input, so the ONE wire that must stay at
                 // resource level is the top-cover re-sample trigger; without it a cover in place at power-on is never reported.
+                var topCover = new System.Collections.Generic.HashSet<string>(
+                    cfg.Rig.Roles.TopCoverSensor, StringComparer.OrdinalIgnoreCase);
                 var tcFb = net.Elements(Ns + "FB").FirstOrDefault(f =>
                     (string?)f.Attribute("Type") == cfg.Manifest.SensorType.Name &&
-                    ((string?)f.Attribute("Name") ?? "").ToLowerInvariant().Contains("cover"));
+                    topCover.Contains((string?)f.Attribute("Name") ?? ""));
                 if (tcFb != null)
                     AddEvent(ec, $"{BrokerFbName}.CoverSensorEvent",
                              $"{(string)tcFb.Attribute("Name")!}.RD");
@@ -391,13 +440,13 @@ namespace CodeGen.Devices.BX1
 
         // The broker instance itself. It carries no symlink names and no interface arity: the bridge that
         // needed those now lives inside PLC_RW_BX1.
-        static void AddBrokerFbIfAbsent(XElement net, bool isSysres, int x, int y)
+        static void AddBrokerFbIfAbsent(XElement net, string brokerFbId, bool isSysres, int x, int y)
         {
             if (net.Elements(Ns + "FB").Any(f => (string?)f.Attribute("Name") == BrokerFbName)) return;
             var fb = new XElement(Ns + "FB",
-                new XAttribute("ID", BrokerFbId), new XAttribute("Name", BrokerFbName),
+                new XAttribute("ID", brokerFbId), new XAttribute("Name", BrokerFbName),
                 new XAttribute("Type", BrokerFbType), new XAttribute("Namespace", Configuration.GenerationConfig.Namespace));
-            if (isSysres) fb.Add(new XAttribute("Mapping", BrokerFbId));
+            if (isSysres) fb.Add(new XAttribute("Mapping", brokerFbId));
             fb.Add(new XAttribute("x", x.ToString()), new XAttribute("y", y.ToString()));
 
             var firstConn = net.Element(Ns + "EventConnections")
