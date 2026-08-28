@@ -40,3 +40,9 @@ actuatorInputPollMs: 200
 # the generated solution, spelled once here rather than at each of the two dozen places that emit a
 # Namespace attribute.
 projectNamespace: Main
+
+# What the generated application and its one canvas layer are CALLED in the EAE device tree. Names an
+# engineer reads, so they are declared here; a Clean BLANKS both, which is how a wiped project is told
+# from a generated one.
+applicationName: WMG
+layerName: SMC_Rig
