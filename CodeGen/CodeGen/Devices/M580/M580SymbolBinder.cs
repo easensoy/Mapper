@@ -31,7 +31,7 @@ namespace CodeGen.Devices.M580
             return m;
         }
 
-        public static void BindM580(Configuration.CompilerConfiguration? config,
+        public static void BindM580(Configuration.CompilerConfiguration? config, PlcAssignment target,
             SystemInjector.BindingApplicationReport report)
         {
             string Log(string m) { var s = $"[HcfBind][M580] {m}"; report.Missing.Add(s); return s; }
@@ -43,7 +43,7 @@ namespace CodeGen.Devices.M580
                 if (string.IsNullOrEmpty(eaeRoot)) { Log("skipped, could not derive EAE project root"); return; }
 
                 var sysdevFile = EaeProjectLayout.FindSysdevByDeviceType(
-                    eaeRoot, config!.Targets.Of(CodeGen.Translation.PlcAssignment.Named("M580")).DeviceType);
+                    eaeRoot, config!.Targets.Of(target).DeviceType);
                 if (sysdevFile == null) { Log("skipped, no deployed M580 sysdev (Type=M580_dPAC)"); return; }
 
                 var stem = Path.GetFileNameWithoutExtension(sysdevFile);
@@ -54,7 +54,7 @@ namespace CodeGen.Devices.M580
                 var (resId, resName) = HcfBindingSupport.ReadSysresIdentity(folder);
                 if (string.IsNullOrEmpty(resId)) { Log("skipped, deployed sysres ID not resolvable"); return; }
                 // resName is what EAE's $${PATH} macro resolves to as the leading symlink segment.
-                if (string.IsNullOrWhiteSpace(resName)) resName = config!.Targets.Of(PlcAssignment.Named("M580")).ResourceName;
+                if (string.IsNullOrWhiteSpace(resName)) resName = config!.Targets.Of(target).ResourceName;
 
                 var compId = HcfBindingSupport.BuildComponentIdMap(folder);
                 if (compId.Count == 0)
