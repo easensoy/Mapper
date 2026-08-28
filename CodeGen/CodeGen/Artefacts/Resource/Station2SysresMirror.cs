@@ -32,7 +32,7 @@ namespace CodeGen.Devices.Core
 
             return ctx.Targets.All
                 .Where(t => t.DeviceLocalCanvas && ctx.Emits(t.Plc))
-                .Select(t => (t.Plc, MirrorBucket(eaeRoot, t.DeviceType,
+                .Select(t => (t.Plc, MirrorBucket(cfg, eaeRoot, t.DeviceType,
                     all.Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation, ctx.Cfg) == t.Plc).ToList(),
                     ctx.Layout.Geometry.DeviceCanvasOrigin,
                     ctx.Targets.BootFor(t.Plc, ctx.Layout), ctx.Manifest)))
@@ -62,7 +62,8 @@ namespace CodeGen.Devices.Core
             }).ToList();
         }
 
-        static int MirrorBucket(string eaeRoot, string deviceType, List<SysresFbMirror.SyslayFb> bucket,
+        static int MirrorBucket(Configuration.CompilerConfiguration cfg,
+            string eaeRoot, string deviceType, List<SysresFbMirror.SyslayFb> bucket,
             CanvasPoint origin, IReadOnlyList<SystemFbSpec> systemFbs, Mapping.TemplateIndex manifest)
         {
             if (bucket.Count == 0) return 0;
@@ -78,7 +79,7 @@ namespace CodeGen.Devices.Core
 
             // EAE Solution Integrity requires a sibling "{resId}/" folder with an opcua.xml whose UID is
             // the parent sysdev-folder GUID.
-            SystemInjector.EnsureOpcuaXmlBesideArtefact(sysres);
+            SystemInjector.EnsureOpcuaXmlBesideArtefact(cfg, sysres);
 
             return added;
         }
