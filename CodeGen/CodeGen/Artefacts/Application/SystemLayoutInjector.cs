@@ -199,13 +199,15 @@ namespace CodeGen.Translation
             {
                 var grid = ctx.Layout.Geometry.InjectedReporters;
                 int synthY = grid.Y;
+                // An injected reporter rides the cross-controller segment, so it inits off the first
+                // sensor already on the ring that segment reports onto. Which ring that is comes from
+                // where the plan put the segment, not from a flag naming one plant's station.
                 string prevSynthInit = contents.Sensors
                     .Select(s => (s.Name ?? string.Empty).Trim())
-                    .First(n => ctx.Targets.Of(ctx.Allocation.Of(n)).HostsFeedStation);
-                foreach (var (synthName, synthId) in MapperConfig.M262SynthSensors)
+                    .First(n => ctx.Targets.RingHostOf(ctx.Targets.Of(ctx.Allocation.Of(n)))
+                                == ctx.SegmentRingHost);
+                foreach (var (synthName, synthId) in ctx.InjectedReporterRows)
                 {
-                    if (!ctx.InjectedReporters.Contains(synthName, StringComparer.OrdinalIgnoreCase))
-                        continue;
                     builder.AddFB(FBIdGenerator.GenerateFBId("m262rigsensor-" + synthName),
                         synthName, ctx.Manifest.SensorType.Name,
                         Configuration.GenerationConfig.Namespace, grid.X, synthY,
@@ -306,7 +308,7 @@ namespace CodeGen.Translation
                 // has, then any connection added because this run relocated components onto a resource
                 // that would otherwise have none.
                 bool AddedByRelocation(MqttConnectionDeclaration c) =>
-                    ctx.Targets.Of(c.Plc).ReceivesRelocatedComponents;
+                    ctx.Targets.Of(c.Plc).StandsInFor != null;
 
                 var wired = connections.Where(c => StarterOf(c) is { Length: > 0 }).ToList();
                 foreach (var c in wired.Where(c => !AddedByRelocation(c)))
@@ -369,7 +371,7 @@ namespace CodeGen.Translation
             doc.Save(fullPath);
 
             // EAE Solution Integrity requires an opcua.xml inside a folder named after the syslay stem.
-            EnsureOpcuaXmlBesideArtefact(fullPath);
+            EnsureOpcuaXmlBesideArtefact(ctx.Cfg, fullPath);
 
             // The HMI is derived from the finished layout (FB Id -> TagName, FB Type -> faceplate).
             CodeGen.Hmi.HmiGenerator.Emit(fullPath, ctx);
@@ -596,7 +598,8 @@ namespace CodeGen.Translation
 
 
         // opcua.xml stub in a folder named after the artefact stem, so EAE's Solution Integrity check passes.
-        public static void EnsureOpcuaXmlBesideArtefact(string artefactPath)
-            => CodeGen.Artefacts.OpcuaCompanionEmitter.EmitForArtefact(artefactPath);
+        public static void EnsureOpcuaXmlBesideArtefact(
+            Configuration.CompilerConfiguration? cfg, string artefactPath)
+            => CodeGen.Artefacts.OpcuaCompanionEmitter.EmitForArtefact(cfg, artefactPath);
     }
 }
