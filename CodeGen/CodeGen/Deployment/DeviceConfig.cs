@@ -32,6 +32,9 @@
 
         public InstallationIdentity Installation { get; set; } = new();
 
+        // The physical network, declared as a graph. See Config/device.yml.
+        public TopologyProfile Topology { get; set; } = new();
+
         // The order a run drives the backends, declared because it is NOT the declaration order:
         // a device whose System folder another one creates has to come after it.
         public System.Collections.Generic.List<CodeGen.Translation.PlcAssignment> BackendEmitOrder { get; set; } = new();
@@ -49,7 +52,8 @@
         // duplicate name, or a version that is not a dotted number would each reach the .dfbproj as
         // a reference EAE cannot resolve, and the topology import fails as a whole rather than on
         // the one device that needed it.
-        private static void Validate(DeviceConfig c)
+        // Public so a test can ask the same validator a run asks, exactly as RigCatalogValidator is.
+        public static void Validate(DeviceConfig c)
         {
             var errors = new System.Collections.Generic.List<string>();
             foreach (var lib in c.Libraries)
@@ -120,11 +124,146 @@
                 if (string.IsNullOrWhiteSpace(value) || !value.EndsWith(".Properties.xml", System.StringComparison.OrdinalIgnoreCase))
                     errors.Add($"installation.{field} '{value}' is not a <plugin-guid>.Properties.xml file name");
 
+            errors.AddRange(TopologyErrors(c));
+            errors.AddRange(RelationErrors(c));
+
             if (errors.Count > 0)
                 throw new System.InvalidOperationException(
                     "device.yml is invalid:" + System.Environment.NewLine +
                     "  - " + string.Join(System.Environment.NewLine + "  - ", errors));
         }
+
+        // A RELATIONSHIP BETWEEN TARGETS RESOLVES, OR THE RUN STOPS.
+        //
+        // Each edge is stated once and its other end is derived, so an edge naming a target that is not
+        // declared would silently derive to nothing: a stand-in that relieves no one still gets emitted
+        // and owns no ring, and a chain nobody commands stays open at both ends and never closes. Both
+        // deploy and neither runs, so they are refused here rather than found on the rig.
+        static System.Collections.Generic.IEnumerable<string> RelationErrors(DeviceConfig c)
+        {
+            var errors = new System.Collections.Generic.List<string>();
+            var declared = new System.Collections.Generic.HashSet<string>(
+                c.Targets.Select(t => t.Plc.Name), System.StringComparer.OrdinalIgnoreCase);
+
+            foreach (var t in c.Targets)
+                foreach (var (field, other) in new[]
+                         { ("standsInFor", t.StandsInFor), ("chainCommandedBy", t.ChainCommandedBy) })
+                {
+                    if (string.IsNullOrWhiteSpace(other)) continue;
+                    if (string.Equals(other, t.Plc.Name, System.StringComparison.OrdinalIgnoreCase))
+                        errors.Add($"target '{t.Plc}' declares {field} pointing at itself");
+                    else if (!declared.Contains(other!))
+                        errors.Add($"target '{t.Plc}' declares {field} '{other}', which is not a declared target");
+                }
+
+            // A stand-in owns no ring, so standing in for one is a chain of borrowed rings that ends
+            // nowhere: the ring a relocated component reports on would not exist.
+            foreach (var t in c.Targets.Where(t => !string.IsNullOrWhiteSpace(t.StandsInFor)))
+            {
+                var host = c.Targets.FirstOrDefault(o =>
+                    string.Equals(o.Plc.Name, t.StandsInFor, System.StringComparison.OrdinalIgnoreCase));
+                if (host != null && !string.IsNullOrWhiteSpace(host.StandsInFor))
+                    errors.Add($"target '{t.Plc}' stands in for '{host.Plc}', which itself stands in for " +
+                               $"'{host.StandsInFor}'. A stand-in owns no ring, so there is none to share.");
+            }
+
+            // A target whose chain another one commands cannot also command that one's: the two rings
+            // would each be open waiting for the other to close them.
+            foreach (var t in c.Targets.Where(t => !string.IsNullOrWhiteSpace(t.ChainCommandedBy)))
+            {
+                var commander = c.Targets.FirstOrDefault(o =>
+                    string.Equals(o.Plc.Name, t.ChainCommandedBy, System.StringComparison.OrdinalIgnoreCase));
+                if (commander != null &&
+                    string.Equals(commander.ChainCommandedBy, t.Plc.Name, System.StringComparison.OrdinalIgnoreCase))
+                    errors.Add($"targets '{t.Plc}' and '{commander.Plc}' each declare the other commands " +
+                               "their chain, so neither ring can close.");
+            }
+            return errors;
+        }
+
+        // EVERY ENDPOINT MUST RESOLVE BEFORE A WIRE IS WRITTEN.
+        //
+        // TopologyManager rejects the WHOLE topology on one unresolvable endpoint - a 500 at import, with
+        // nothing to say which wire caused it. So a link naming a node that is not declared, an identity
+        // that node does not carry, or a port nothing names is refused here, at load, before a plan
+        // exists and therefore before anything is written.
+        //
+        // Two devices claiming one switch port is refused for the same reason it was never checked
+        // before: the allocation lived in a comment, so nothing could check it.
+        static System.Collections.Generic.IEnumerable<string> TopologyErrors(DeviceConfig c)
+        {
+            var errors = new System.Collections.Generic.List<string>();
+            var t = c.Topology;
+            if (t.Links.Count == 0) return errors;
+
+            var nodeIds = new System.Collections.Generic.HashSet<string>(
+                t.Nodes.Select(n => n.Id ?? string.Empty), System.StringComparer.OrdinalIgnoreCase);
+            foreach (var n in t.Nodes)
+            {
+                if (string.IsNullOrWhiteSpace(n.Id)) errors.Add("topology.nodes has an entry with no id");
+                if (!System.Guid.TryParse(n.Equipment ?? string.Empty, out _))
+                    errors.Add($"topology node '{n.Id}' equipment '{n.Equipment}' is not a UUID");
+                if (n.Emit && string.IsNullOrWhiteSpace(n.Template))
+                    errors.Add($"topology node '{n.Id}' is emitted but names no template");
+            }
+            foreach (var g in t.Nodes.GroupBy(n => n.Id ?? string.Empty,
+                         System.StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
+                errors.Add($"topology declares node '{g.Key}' {g.Count()} times");
+
+            foreach (var g in t.Links.GroupBy(l => l.Identifier ?? string.Empty,
+                         System.StringComparer.OrdinalIgnoreCase).Where(g => g.Count() > 1))
+                errors.Add($"topology declares link '{g.Key}' {g.Count()} times");
+
+            // A port is claimed by exactly one cable end. Two cables on one port is a wiring error the
+            // topology importer does not catch and the rig cannot honour.
+            var claimed = new System.Collections.Generic.Dictionary<string, string>(
+                System.StringComparer.OrdinalIgnoreCase);
+
+            foreach (var link in t.Links)
+            {
+                if (string.IsNullOrWhiteSpace(link.Identifier))
+                    errors.Add("topology.links has an entry with no identifier");
+                foreach (var (side, e) in new[] { ("from", link.From), ("to", link.To) })
+                {
+                    var where = $"topology link '{link.Identifier}' {side}";
+                    if (string.IsNullOrWhiteSpace(e.Port)) { errors.Add($"{where} names no port"); continue; }
+                    if (string.IsNullOrWhiteSpace(e.Node)) { errors.Add($"{where} names no node"); continue; }
+
+                    var key = e.Node.Trim() + "." + e.Endpoint?.Trim() + "." + e.Port.Trim();
+                    if (claimed.TryGetValue(key, out var owner))
+                        errors.Add($"{where} claims '{key}', which link '{owner}' already uses");
+                    else claimed[key] = link.Identifier ?? string.Empty;
+
+                    if (nodeIds.Contains(e.Node)) continue;          // a declared non-target node
+                    var target = c.Targets.FirstOrDefault(x =>
+                        string.Equals(x.Plc.Name, e.Node, System.StringComparison.OrdinalIgnoreCase));
+                    if (target == null)
+                    {
+                        errors.Add($"{where} names node '{e.Node}', which is neither a declared target " +
+                                   "nor a topology node");
+                        continue;
+                    }
+                    if (string.IsNullOrWhiteSpace(EndpointUuid(target.Identity, e.Endpoint)))
+                        errors.Add($"{where} attaches to '{e.Endpoint}' on target '{e.Node}', which " +
+                                   "declares no such identity");
+                }
+            }
+            return errors;
+        }
+
+        // Which declared identity a cable end attaches to. Empty when the target does not carry it,
+        // which is what the validation above turns into a refusal.
+        public static string EndpointUuid(DeviceIdentity id, string? endpoint) =>
+            (endpoint ?? "equipment").Trim().ToLowerInvariant() switch
+            {
+                "equipment" or "" => id.Equipment,
+                "cpu" => id.Cpu,
+                "nic" => id.Nic,
+                "ethernetip" => id.EtherNetIp,
+                "container" => id.Container,
+                "rack" => id.Rack,
+                _ => string.Empty,
+            };
 
         public static DeviceConfig Current => _file.Load();
 
@@ -245,6 +384,40 @@
         public string SystemDeviceProperties { get; set; } = string.Empty;
     }
 
+    // THE PHYSICAL NETWORK GRAPH. A node that is not a deployment target (the switch); a link between
+    // two endpoints, each naming a node and which of that node's identities the cable lands on.
+    public sealed class TopologyProfile
+    {
+        public System.Collections.Generic.List<TopologyNode> Nodes { get; set; } = new();
+        public System.Collections.Generic.List<TopologyLink> Links { get; set; } = new();
+    }
+
+    public sealed class TopologyNode
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Equipment { get; set; } = string.Empty;
+        // The template rendered for this node, when the node is one this emitter writes.
+        public string Template { get; set; } = string.Empty;
+        public bool Emit { get; set; }
+    }
+
+    public sealed class TopologyLink
+    {
+        public string Identifier { get; set; } = string.Empty;
+        public TopologyEndpoint From { get; set; } = new();
+        public TopologyEndpoint To { get; set; } = new();
+        // A link to a device that exists only when this run relocates something onto it.
+        public bool RequiresRelocation { get; set; }
+    }
+
+    public sealed class TopologyEndpoint
+    {
+        public string Node { get; set; } = string.Empty;
+        // Which identity on that node the cable attaches to: equipment, cpu, nic, etherNetIp, container.
+        public string Endpoint { get; set; } = "equipment";
+        public string Port { get; set; } = string.Empty;
+    }
+
     public sealed class LibraryReference
     {
         public string Name { get; set; } = string.Empty;
@@ -280,13 +453,22 @@
         // Components only this target's own I/O hardware can read, so it must host them.
         public System.Collections.Generic.List<string> AlwaysHosts { get; set; } = new();
 
-        // Each flag selects a path in a device emitter, so declare a target only once its emitter
-        // exists; see TargetRegistry.
-        public bool HostsFeedStation { get; set; }
+        // Its sysres canvas is device-local, so FBs translate to a local origin.
         public bool DeviceLocalCanvas { get; set; }
-        public bool ReceivesRelocatedComponents { get; set; }
-        public bool OpensCoverSeam { get; set; }
-        public bool CarriesDetouredChain { get; set; }
+
+        // HOW THIS TARGET RELATES TO ANOTHER ONE. Both are edges, and each is stated ONCE, from the
+        // end that owns it; the other end is derived. They replace four booleans that each named a
+        // role in one plant ("hosts the feed station", "opens the cover seam") and had to be kept
+        // consistent by hand - two of them were the two ends of a single relationship, so a target
+        // could declare it carried a chain nobody commanded, or command one nobody carried.
+        //
+        // This target stands in for another: it takes over components moved off it. A stand-in shares
+        // that target's report ring rather than owning one, and exists only when something is moved.
+        public string? StandsInFor { get; set; }
+
+        // This target's components are commanded from another one, so its chain is spliced onto that
+        // target's ring and is open at BOTH ends here. The commanding target opens the seam.
+        public string? ChainCommandedBy { get; set; }
 
         // The IO broker FB this target hosts, where it has one. An emitted FB that is not a plant
         // component still needs an OWNER, and the target that hosts it is the one place that knows.
