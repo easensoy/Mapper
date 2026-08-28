@@ -278,6 +278,206 @@ namespace MapperTests
                 .Select(t => t.IoBroker!).ToList();
             Assert.Equal(claimed.Count, claimed.Distinct(StringComparer.Ordinal).Count());
         }
+        // ---- the physical topology graph -------------------------------------------------------
+
+        // TopologyManager rejects the WHOLE topology on ONE unresolvable endpoint - a 500 at import that
+        // names nothing. So every way a declared link can fail to resolve is refused when device.yml
+        // loads: before a plan exists, and therefore before anything is written.
+        static DeviceConfig Devices(string extraLinks, string extraNodes = "")
+        {
+            var c = Parse<DeviceConfig>(
+            "installation:\n  switchEquipment: 11111111-2222-3333-4444-000000000060\n" +
+            "  deployPluginProperties: A.Properties.xml\n  systemDeviceProperties: B.Properties.xml\n" +
+            "targets:\n" +
+            "  - plc: M262\n    backendKind: M262\n    resourceName: R\n    deviceType: T\n" +
+            "    identity:\n      sysdev: 00000000-0000-0000-0000-000000000002\n" +
+            "      equipment: 11111111-2222-3333-4444-000000000010\n" +
+            "topology:\n  nodes:\n    - id: Switch_1\n      equipment: 11111111-2222-3333-4444-000000000060\n" +
+            "      template: Equipment_Switch.json\n      emit: true\n" + extraNodes +
+            "  links:\n" + extraLinks);
+            DeviceConfig.Validate(c);   // the same validator a run runs, so a test asks what a run asks
+            return c;
+        }
+
+        [Theory]
+        // A node no target and no topology entry declares.
+        [InlineData("    - identifier: L1\n      from: { node: Ghost, endpoint: equipment, port: P1 }\n" +
+                    "      to:   { node: Switch_1, endpoint: equipment, port: Port1 }\n", "neither a declared target")]
+        // An identity the named target does not carry: M262 declares no CPU, so ETH1 lands nowhere.
+        [InlineData("    - identifier: L1\n      from: { node: M262, endpoint: cpu, port: ETH1 }\n" +
+                    "      to:   { node: Switch_1, endpoint: equipment, port: Port1 }\n", "declares no such identity")]
+        // A cable end with no port is a wire EAE cannot attach.
+        [InlineData("    - identifier: L1\n      from: { node: M262, endpoint: equipment }\n" +
+                    "      to:   { node: Switch_1, endpoint: equipment, port: Port1 }\n", "names no port")]
+        // Two cables on one port: a wiring error the importer does not catch and the rig cannot honour.
+        [InlineData("    - identifier: L1\n      from: { node: M262, endpoint: equipment, port: E1 }\n" +
+                    "      to:   { node: Switch_1, endpoint: equipment, port: Port1 }\n" +
+                    "    - identifier: L2\n      from: { node: M262, endpoint: equipment, port: E2 }\n" +
+                    "      to:   { node: Switch_1, endpoint: equipment, port: Port1 }\n", "already uses")]
+        // One label, two wires: which file a link writes is its identifier, so a repeat overwrites.
+        [InlineData("    - identifier: L1\n      from: { node: M262, endpoint: equipment, port: E1 }\n" +
+                    "      to:   { node: Switch_1, endpoint: equipment, port: Port1 }\n" +
+                    "    - identifier: L1\n      from: { node: M262, endpoint: equipment, port: E2 }\n" +
+                    "      to:   { node: Switch_1, endpoint: equipment, port: Port2 }\n", "declares link")]
+        public void An_unresolvable_topology_link_is_refused_before_anything_is_written(
+            string links, string because)
+        {
+            var ex = Assert.ThrowsAny<Exception>(() => Devices(links));
+            Assert.Contains(because, ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void An_emitted_topology_node_that_names_no_template_is_refused()
+        {
+            var ex = Assert.ThrowsAny<Exception>(() => Devices(
+                "    - identifier: L1\n      from: { node: M262, endpoint: equipment, port: E1 }\n" +
+                "      to:   { node: Extra, endpoint: equipment, port: P1 }\n",
+                "    - id: Extra\n      equipment: 11111111-2222-3333-4444-000000000061\n      emit: true\n"));
+            Assert.Contains("names no template", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void The_shipped_topology_graph_resolves_every_endpoint_it_declares()
+        {
+            // The refusals above are only worth having if the shipped declaration also satisfies them.
+            var graph = TestConfig.Cfg.Devices.Topology;
+            Assert.NotEmpty(graph.Links);
+            foreach (var link in graph.Links)
+                foreach (var e in new[] { link.From, link.To })
+                {
+                    var uuid = graph.Nodes
+                        .FirstOrDefault(n => string.Equals(n.Id, e.Node, StringComparison.OrdinalIgnoreCase))
+                        ?.Equipment
+                        ?? DeviceConfig.EndpointUuid(
+                            TestConfig.Cfg.Devices.Targets.First(t =>
+                                string.Equals(t.Plc.Name, e.Node, StringComparison.OrdinalIgnoreCase)).Identity,
+                            e.Endpoint);
+                    Assert.False(string.IsNullOrWhiteSpace(uuid),
+                        $"link '{link.Identifier}' endpoint '{e.Node}.{e.Endpoint}' resolves to nothing");
+                }
+        }
+
+        // ---- how one target relates to another --------------------------------------------------
+
+        // A relationship is stated ONCE, from the end that owns it, and its other end is derived. An
+        // edge naming a target that is not declared would derive to nothing: a stand-in that relieves
+        // no one still gets emitted and owns no ring, and a chain nobody commands never closes. Both
+        // deploy and neither runs, so they are refused at load.
+        static DeviceConfig Related(string firstExtra, string secondExtra = "") => Parse<DeviceConfig>(
+            "installation:\n  switchEquipment: 11111111-2222-3333-4444-000000000060\n" +
+            "  deployPluginProperties: A.Properties.xml\n  systemDeviceProperties: B.Properties.xml\n" +
+            "targets:\n" +
+            "  - plc: A\n    backendKind: M262\n    resourceName: R1\n    deviceType: T\n" +
+            "    identity:\n      sysdev: 00000000-0000-0000-0000-000000000002\n" + firstExtra +
+            "  - plc: B\n    backendKind: M580\n    resourceName: R2\n    deviceType: U\n" +
+            "    identity:\n      sysdev: 00000000-0000-0000-0000-000000000003\n" + secondExtra);
+
+        [Theory]
+        [InlineData("    standsInFor: Ghost\n", "", "not a declared target")]
+        [InlineData("    chainCommandedBy: Ghost\n", "", "not a declared target")]
+        [InlineData("    standsInFor: A\n", "", "pointing at itself")]
+        [InlineData("    chainCommandedBy: A\n", "", "pointing at itself")]
+        // A stand-in owns no ring, so standing in for one borrows a ring that does not exist.
+        [InlineData("    standsInFor: B\n", "    standsInFor: A\n", "itself stands in for")]
+        // Each waiting for the other to close its ring: neither ever does.
+        [InlineData("    chainCommandedBy: B\n", "    chainCommandedBy: A\n", "neither ring can close")]
+        public void A_relationship_that_cannot_resolve_is_refused_at_load(
+            string first, string second, string because)
+        {
+            var ex = Assert.ThrowsAny<Exception>(() => DeviceConfig.Validate(Related(first, second)));
+            Assert.Contains(because, ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void The_shipped_relationships_resolve_from_both_ends()
+        {
+            var targets = TestConfig.Cfg.Targets;
+            foreach (var t in targets.All)
+            {
+                if (t.StandsInFor is { } host)
+                {
+                    Assert.True(targets.IsRegistered(host));
+                    Assert.Equal(host, targets.RingHostOf(t));           // borrows that ring
+                    Assert.Contains(t.Plc, targets.RingMembers(host));   // and is counted on it
+                }
+                if (t.ChainCommandedBy is { } commander)
+                {
+                    Assert.True(targets.IsRegistered(commander));
+                    // The other end is DERIVED, so it cannot disagree with the end that declared it.
+                    Assert.True(targets.CommandsACarriedChain(commander));
+                    Assert.False(targets.CommandsACarriedChain(t.Plc));
+                }
+            }
+            // Every ring has an owner, and a target that owns one is nobody's stand-in.
+            Assert.Contains(targets.All, t => t.StandsInFor != null);
+            Assert.Contains(targets.All, t => t.ChainCommandedBy != null);
+        }
+
+        // ---- the BX1 cover safe-start -----------------------------------------------------------
+
+        // The gate that forces one actuator home on start, and the coupler fallback word the operator is
+        // told to set so it STAYS home on Clean/Stop/fault, are two statements about one coil. They are
+        // resolved once; these pin that an unresolvable safe-start is refused rather than half-wired.
+        static Bx1IoProfile Io(string yaml) => Parse<Bx1IoProfile>(yaml);
+
+        const string TwoCovers =
+            "covers:\n" +
+            "  - component: A\n    event: AEvent\n" +
+            "    sensorFromHome: { signal: AHome, bit: 0 }\n" +
+            "    coilToWork: { signal: AWork, bit: 0 }\n    coilToHome: { signal: AHomeCoil, bit: 1 }\n" +
+            "  - component: B\n    event: BEvent\n" +
+            "    sensorFromWork: { signal: BWork, bit: 5 }\n" +
+            "    coilToWork: { signal: BWorkCoil, bit: 2 }\n";
+
+        [Theory]
+        [InlineData("", "declares no safeStartComponent")]              // nothing says which one homes
+        [InlineData("safeStartComponent: C\n", "matches 0 declared")]   // names an actuator with no row
+        [InlineData("safeStartComponent: B\n", "no coilToHome")]        // single-acting: cannot be driven home
+        public void An_unresolvable_safe_start_is_refused_rather_than_half_wired(string extra, string because)
+        {
+            var ex = Assert.ThrowsAny<Exception>(() =>
+                CodeGen.Devices.BX1.Bx1SafeStart.Resolve(Io(TwoCovers + extra)));
+            Assert.Contains(because, ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void A_safe_start_actuator_with_no_home_sensor_is_refused()
+        {
+            // Without an at-home sensor the gate has nothing to release on: it would drive home forever.
+            var io = Io(TwoCovers.Replace("    sensorFromHome: { signal: AHome, bit: 0 }\n", "") +
+                        "safeStartComponent: A\n");
+            var ex = Assert.ThrowsAny<Exception>(() =>
+                CodeGen.Devices.BX1.Bx1SafeStart.Resolve(io));
+            Assert.Contains("no sensorFromHome", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Two_coils_on_one_output_word_bit_are_refused()
+        {
+            // One bit drives one solenoid. Two would make the gate hold off a coil it also drives.
+            var io = Io(TwoCovers.Replace("{ signal: BWorkCoil, bit: 2 }", "{ signal: BWorkCoil, bit: 1 }") +
+                        "safeStartComponent: A\n");
+            var ex = Assert.ThrowsAny<Exception>(() =>
+                CodeGen.Devices.BX1.Bx1SafeStart.Resolve(io));
+            Assert.Contains("coils on output word bit 1", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void The_shipped_safe_start_resolves_and_its_word_homes_only_that_actuator()
+        {
+            // The refusals matter only if the shipped declaration also satisfies them - and the word the
+            // operator is told to set must be exactly the safe actuator's home coil and nothing else.
+            var plan = CodeGen.Devices.BX1.Bx1SafeStart.Resolve(TestConfig.Cfg);
+            Assert.Equal(TestConfig.Cfg.Devices.Bx1Io.SafeStartComponent, plan.Component);
+            Assert.Equal(1 << plan.CoilToHome.Bit, plan.FallbackWord);
+            foreach (var c in plan.Coils)
+                Assert.Equal(c.DrivesHome && c.Component == plan.Component,
+                             (plan.FallbackWord & (1 << c.Signal.Bit)) != 0);
+            // Every other declared coil is held off, and none of them is one of the two it drives.
+            Assert.DoesNotContain(plan.HeldOff, c => c.Component == plan.Component);
+            Assert.Equal(plan.Coils.Count - 2, plan.HeldOff.Count);
+        }
+
         // A test is its own composition root: it reads the declarations the same way a run does.
         private static CompilerConfiguration Cfg() => TestConfig.Cfg;
 
