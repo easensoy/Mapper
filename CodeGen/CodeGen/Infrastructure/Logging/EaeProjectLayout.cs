@@ -276,7 +276,8 @@ namespace CodeGen.Devices.Core
                     var root = XDocument.Load(sd).Root;
                     if (root == null || root.Name.LocalName != "Device") continue;
                     if (string.Equals((string?)root.Attribute("Type"), deviceType, StringComparison.Ordinal) &&
-                        string.Equals((string?)root.Attribute("Namespace"), "SE.DPAC", StringComparison.Ordinal) &&
+                        string.Equals((string?)root.Attribute("Namespace"), Artefacts.EaeAbi.DeviceNamespace,
+                            StringComparison.Ordinal) &&
                         (deviceName == null ||
                          string.Equals((string?)root.Attribute("Name"), deviceName, StringComparison.Ordinal)))
                         return sd;
