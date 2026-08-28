@@ -10,8 +10,8 @@ namespace CodeGen.Devices.Core
     // PrepareDemonstratorForGeneration, which throws when the .syslay is missing.
     public static class ApplicationShellEmitter
     {
-        public const string SystemId = "00000000-0000-0000-0000-000000000000";
-        public const string AppId    = "00000000-0000-0000-0000-000000000001";
+        public const string SystemId = Artefacts.EaeAbi.SystemId;
+        public const string AppId    = Artefacts.EaeAbi.ApplicationId;
 
         // Only acts when the .sysapp is absent.
         public static bool EnsureApplicationShell(Configuration.CompilerConfiguration cfg, string? eaeRoot, Action<string>? log = null)
@@ -21,7 +21,7 @@ namespace CodeGen.Devices.Core
             if (!Directory.Exists(systemDir)) return false;
 
             var containerDir = Path.Combine(systemDir, SystemId);          // System/000000/
-            var sysappPath   = Path.Combine(containerDir, AppId + ".sysapp");
+            var sysappPath   = Path.Combine(containerDir, AppId + Artefacts.EaeAbi.ApplicationExtension);
             if (File.Exists(sysappPath)) return false;                     // present -> no-op
 
             var appDir       = Path.Combine(containerDir, AppId);          // System/000000/000001/
@@ -34,14 +34,14 @@ namespace CodeGen.Devices.Core
                     new Dictionary<string, string> { ["AppId"] = AppId }));
 
                 // Placeholder so Prepare's File.Exists check passes; the real layout overwrites it.
-                var syslayPath = Path.Combine(appDir, SystemId + ".syslay"); // == SyslayPath2
+                var syslayPath = Path.Combine(appDir, SystemId + Artefacts.EaeAbi.LayoutExtension); // == SyslayPath2
                 if (!File.Exists(syslayPath))
                     File.WriteAllText(syslayPath, TemplateDocument.Load(cfg, @"Application\Empty.syslay"));
 
                 File.WriteAllText(Path.Combine(companionDir, "aspmap.xml"),
                     TemplateDocument.Load(cfg, @"Application\aspmap.xml"));
-                File.WriteAllText(Path.Combine(companionDir, "opcua.xml"), CodeGen.Artefacts.OpcuaCompanionEmitter.BuildOpcuaCompanion(AppId));
-                File.WriteAllText(Path.Combine(appDir, "opcua.xml"),       CodeGen.Artefacts.OpcuaCompanionEmitter.BuildOpcuaCompanion(SystemId));
+                File.WriteAllText(Path.Combine(companionDir, "opcua.xml"), CodeGen.Artefacts.OpcuaCompanionEmitter.BuildOpcuaCompanion(cfg, AppId));
+                File.WriteAllText(Path.Combine(appDir, "opcua.xml"),       CodeGen.Artefacts.OpcuaCompanionEmitter.BuildOpcuaCompanion(cfg, SystemId));
 
                 var dfbproj = Path.Combine(eaeRoot, "IEC61499", "IEC61499.dfbproj");
                 int reg = DfbprojRegistrar.RegisterApplicationShell(dfbproj);
@@ -66,7 +66,7 @@ namespace CodeGen.Devices.Core
             if (!Directory.Exists(containerDir)) return 0;
 
             int removed = 0;
-            var sysappPath = Path.Combine(containerDir, AppId + ".sysapp");
+            var sysappPath = Path.Combine(containerDir, AppId + Artefacts.EaeAbi.ApplicationExtension);
             if (File.Exists(sysappPath))
             {
                 try { File.Delete(sysappPath); removed++; }
