@@ -24,7 +24,7 @@ namespace MapperUI
 
         public StateTransitionTableForm(string controlXmlPath,
             IReadOnlyList<VueOneComponent> components,
-            CodeGen.Configuration.MapperConfig config,
+            CodeGen.Configuration.CompilerConfiguration config,
             CodeGen.Mapping.DeploymentProfile profile)
         {
             Text = "State-Transition Table";
@@ -50,7 +50,7 @@ namespace MapperUI
         }
 
         public void Reload(string controlXmlPath, IReadOnlyList<VueOneComponent> components,
-            CodeGen.Configuration.MapperConfig config, CodeGen.Mapping.DeploymentProfile profile)
+            CodeGen.Configuration.CompilerConfiguration config, CodeGen.Mapping.DeploymentProfile profile)
         {
             _header.Text = $"Source: {Path.GetFileName(controlXmlPath)}   ({controlXmlPath})";
 
@@ -136,7 +136,7 @@ namespace MapperUI
         // MapperConfig here planned with no instance-name overrides and an empty template library, and
         // AsPlaced discarded the Device column - so the preview showed a project Generate never writes.
         public static Snapshot Build(IReadOnlyList<VueOneComponent> components,
-            CodeGen.Configuration.MapperConfig config, CodeGen.Mapping.DeploymentProfile profile)
+            CodeGen.Configuration.CompilerConfiguration config, CodeGen.Mapping.DeploymentProfile profile)
         {
             var recipeRows = CreateRecipeTable();
             var transitionRows = CreateTransitionTable();
@@ -148,10 +148,9 @@ namespace MapperUI
             string? planError = null;
             try
             {
-                // The preview is its own composition root: it reads every declaration ONCE, exactly
-                // as a generation does, so what it shows is what a run would produce.
-                plan = CodeGen.Translation.GenerationContext.Plan(
-                    CodeGen.Configuration.CompilerConfiguration.Load(config), components, profile);
+                // The RUN's snapshot, handed in. Loading a second one here would let the preview show
+                // a project compiled against declarations the run never used.
+                plan = CodeGen.Translation.GenerationContext.Plan(config, components, profile);
             }
             catch (Exception ex) { planError = ex.Message; }
 
