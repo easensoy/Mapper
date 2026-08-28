@@ -14,7 +14,7 @@ namespace CodeGen.Translation
     {
         public static void Validate(GenerationContext ctx)
         {
-            if (!ctx.Config.MqttPublishEnabled) return;
+            if (!ctx.Cfg.Telemetry.PublishEnabled) return;
 
             var errors = new List<string>();
             var declared = ctx.Cfg.Telemetry.Connections;
@@ -35,7 +35,7 @@ namespace CodeGen.Translation
                     continue;
                 }
 
-                var name = connection.NameFor(ctx.Config.UseTelemetryCat);
+                var name = connection.NameFor(ctx.Cfg.Telemetry.UseTelemetryCat);
                 if (string.IsNullOrWhiteSpace(name))
                     errors.Add($"the connection on '{target.ResourceName}' has no instance name for the " +
                                "form this run emits");
