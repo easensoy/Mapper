@@ -118,7 +118,7 @@ namespace CodeGen.Mapping
         public static DeploymentProfile Relocating(
             IEnumerable<string>? names, Configuration.CompilerConfiguration cfg, PlantFacts? facts = null)
         {
-            var target = cfg.Targets.All.FirstOrDefault(t => t.ReceivesRelocatedComponents)?.Plc;
+            var target = cfg.Targets.All.FirstOrDefault(t => t.StandsInFor != null)?.Plc;
             var map = new Dictionary<string, PlcAssignment>(StringComparer.OrdinalIgnoreCase);
             if (target != null)
                 foreach (var name in names ?? Array.Empty<string>()) map[name] = target.Value;
