@@ -132,5 +132,78 @@ namespace MapperTests
             Assert.Contains(plan.Recipes["Kiln_Line"].CmdTargetName,
                 n => string.Equals(n, TemplateMap.RingKey("Charge_Ram"), StringComparison.Ordinal));
         }
+
+        // The same unfamiliar plant, with a level the process waits on. Its own component, so the
+        // refresh is planned for a sensor no code has heard of.
+        private static GenerationContext PlantWithASensor()
+        {
+            var proc = new VueOneComponent
+            {
+                ComponentID = "C-line", Name = "Kiln_Line", Type = ComponentType.Process,
+                States = new List<VueOneState>
+                {
+                    State("C-line-s0", "Kiln_Entry", 0, true, initial: true),
+                    State("C-line-s1", "Kiln_Charge", 1, true),
+                },
+            };
+            var sensor = new VueOneComponent
+            {
+                ComponentID = "C-eye", Name = "Charge_Eye", Type = ComponentType.Sensor,
+                States = new List<VueOneState>
+                {
+                    State("C-eye-s0", "Clear", 0, true, initial: true),
+                    State("C-eye-s1", "Blocked", 1, true),
+                },
+            };
+            Leads(proc.States[0], proc.States[1], On("C-eye", "C-eye-s1", "Charge_Eye/Blocked"));
+            return GenerationContext.Plan(TestConfig.Cfg, new[] { proc, sensor },
+                DeploymentProfile.AsPlaced(TestConfig.Cfg));
+        }
+
+        [Fact]
+        public void A_sensor_wait_is_preceded_by_the_refresh_its_type_declares()
+        {
+            // A level already true before this PLC started is announced once and never again, so the
+            // recipe asks first. WHICH command, and how the request names the instance, are the type's
+            // own vocabulary: the compiler asks the declaration rather than spelling either.
+            var sensorCat = TestConfig.Cfg.Manifest.SensorType.Name;
+            var refresh = TestConfig.Cfg.Manifest.RefreshOf(sensorCat);
+            Assert.NotNull(refresh);
+
+            var plan = PlantWithASensor();
+            var recipe = plan.Recipes["Kiln_Line"];
+            var sensor = plan.Station.Sensors.Single().Name.Trim();
+            int slot = plan.Slots[sensor];
+
+            // The request addresses the instance the way the type says. It is NOT the ring key here:
+            // the ring's claim test is case-sensitive against the name the type is parameterised with.
+            var addressed = refresh!.AddressBy == RefreshAddressing.RingKey ? TemplateMap.RingKey(sensor) : sensor;
+            for (int i = 0; i < recipe.StepType.Count; i++)
+            {
+                if (recipe.StepType[i] != 2 || recipe.Wait1Id[i] != slot) continue;
+                Assert.True(i > 0, "a sensor wait is the first row, so nothing asked before it");
+                Assert.Equal(1, recipe.StepType[i - 1]);
+                Assert.Equal(addressed, recipe.CmdTargetName[i - 1]);
+                Assert.Equal(refresh.Command, recipe.CmdStateArr[i - 1]);
+            }
+        }
+
+        [Fact]
+        public void A_type_that_declares_no_refresh_is_never_asked_for_one()
+        {
+            // "Cannot be asked" is a real answer, not a missing one: an actuator reports on arrival, so
+            // sending it a refresh would be a command it does not answer. Asking is null, not a throw.
+            foreach (var t in TestConfig.Cfg.Manifest.Types.Where(t => t.Role != TemplateRole.Sensor))
+                Assert.Null(TestConfig.Cfg.Manifest.RefreshOf(t.Name));
+            Assert.Null(TestConfig.Cfg.Manifest.RefreshOf("A_type_no_catalogue_carries"));
+
+            // And nothing in a compiled recipe addresses a type that declares none.
+            var plan = UnfamiliarPlant();
+            var actuator = TemplateMap.RingKey(plan.Station.Actuators.Single().Name);
+            var recipe = plan.Recipes["Kiln_Line"];
+            for (int i = 0; i < recipe.StepType.Count; i++)
+                if (recipe.StepType[i] == 1 && recipe.CmdTargetName[i] == actuator)
+                    Assert.NotEqual(0, recipe.CmdStateArr[i]);   // 0 is the refresh vocabulary, not a stop
+        }
     }
 }
