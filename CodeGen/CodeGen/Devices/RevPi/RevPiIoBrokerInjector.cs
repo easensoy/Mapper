@@ -47,37 +47,48 @@ namespace CodeGen.Devices.RevPi
                 new HashSet<string>(Signals.Select(s => s.Component), StringComparer.OrdinalIgnoreCase);
         }
 
-        // Propagates a resolution failure; answering "nothing" would silently reject every RevPi selection.
-        public static IReadOnlySet<string> CoveredComponents => Current.Components;
+        // EVERY ANSWER IS RESOLVED FROM THE RUN'S OWN SNAPSHOT.
+        //
+        // These were properties over a memoised `Current` that resolved itself from a configuration
+        // global on first touch. Whichever run got there first fixed the coupler every later run in
+        // the process saw, so a second profile pointing at a different template library kept the
+        // first one's signals - and because both are individually valid, nothing reported it.
+        //
+        // Propagates a resolution failure; answering "nothing" would silently reject every selection.
+        public static IReadOnlySet<string> CoveredComponents(CompilerConfiguration cfg) =>
+            Resolve(cfg).Components;
 
         // The same table split by what the coupler drives versus what it reads, so a caller that needs
         // one kind does not have to guess which of the covered names is which.
-        public static IReadOnlyList<string> CoveredActuators =>
-            Current.Coils.Select(s => s.Component).Distinct(StringComparer.OrdinalIgnoreCase)
+        public static IReadOnlyList<string> CoveredActuators(CompilerConfiguration cfg) =>
+            Resolve(cfg).Coils.Select(s => s.Component).Distinct(StringComparer.OrdinalIgnoreCase)
                    .OrderBy(n => n, StringComparer.Ordinal).ToList();
 
-        public static IReadOnlyList<string> CoveredSensors =>
-            Current.Sensors.Select(s => s.Component).Distinct(StringComparer.OrdinalIgnoreCase)
-                   .Except(Current.Coils.Select(s => s.Component), StringComparer.OrdinalIgnoreCase)
-                   .OrderBy(n => n, StringComparer.Ordinal).ToList();
+        public static IReadOnlyList<string> CoveredSensors(CompilerConfiguration cfg)
+        {
+            var c = Resolve(cfg);
+            return c.Sensors.Select(s => s.Component).Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Except(c.Coils.Select(s => s.Component), StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(n => n, StringComparer.Ordinal).ToList();
+        }
 
         // Read from the hardware config, whose Modbus LinkNames resolve against it.
-        public static string BrokerFbId => Current.BrokerFbId;
+        public static string BrokerFbId(CompilerConfiguration cfg) => Resolve(cfg).BrokerFbId;
 
         // Called by the deployer once the pristine coupler type is in place, so the resource holds only the broker.
-        public static void EmbedBridgeInComposite(string fbtPath, Mapping.TargetIndex targets) =>
-            EmbedBridge(Current, targets.Of(PlcAssignment.Named("RevPi")).ResourceName, fbtPath);
+        public static void EmbedBridgeInComposite(CompilerConfiguration cfg, PlcAssignment target, string fbtPath) =>
+            EmbedBridge(Resolve(cfg), cfg.Targets.Of(target).ResourceName, fbtPath);
 
-        static Coupler? _current;
-        internal static Coupler Current => _current ??= Resolve(MapperConfig.Load().TemplateLibraryPath);
+        internal static Coupler Resolve(CompilerConfiguration cfg) =>
+            Resolve(cfg.Paths.TemplateLibraryPath, cfg.Paths.IoBindingsPath);
 
-        internal static Coupler Resolve(string? templateLibraryPath)
+        internal static Coupler Resolve(string? templateLibraryPath, string ioBindingsPath)
         {
             var lib = Locate(templateLibraryPath, BrokerTypeZip)
                 ?? throw Fail($"the coupler type '{BrokerTypeZip}' is not in the template library");
             var hcf = Locate(templateLibraryPath, HcfTemplate)
                 ?? throw Fail($"the hardware config '{HcfTemplate}' is not in the template library");
-            var bindings = IoBindingsLoader.LoadBindings(ResolveBindings(MapperConfig.Load().IoBindingsPath));
+            var bindings = IoBindingsLoader.LoadBindings(ResolveBindings(ioBindingsPath));
 
             // The PRISTINE type is the specification. The deployed copy has already been rewritten here,
             // so reading it back would find a coupler with no coils.
@@ -194,7 +205,7 @@ namespace CodeGen.Devices.RevPi
               ?? Path.Combine(AppContext.BaseDirectory, configured);
 
         // Only the resource copy carries the Mapping; an unmapped resource FB is the orphan EAE offers to repair.
-        internal static bool PlaceBroker(Coupler coupler, string path, bool isResource,
+        internal static bool PlaceBroker(Coupler coupler, PlcAssignment target, string path, bool isResource,
             IReadOnlyList<string> hosted, LayoutCatalog layout, string bootFb)
         {
             if (!File.Exists(path)) return false;
@@ -215,7 +226,7 @@ namespace CodeGen.Devices.RevPi
             var events = Section(net, N("EventConnections"));
             Sweep(net, N, owned, events, Section(net, N("DataConnections")));
 
-            var band = layout.Band(PlcAssignment.Named("RevPi"));
+            var band = layout.Band(target);
             var fb = new XElement(N("FB"),
                 new XAttribute("ID", coupler.BrokerFbId), new XAttribute("Name", BrokerName),
                 new XAttribute("Type", BrokerType), new XAttribute("Namespace", Configuration.GenerationConfig.Namespace));
