@@ -43,13 +43,16 @@ namespace MapperTests
         }
 
         [Fact]
-        public void ExactlyOneTargetIsTheDefaultFeedHost()
+        public void EveryStandInNamesOneRegisteredHostAndBorrowsItsRing()
         {
-            // The Feed station has one home when nothing has been relocated; a second would make the
-            // default ambiguous.
-            Assert.True(TestConfig.Cfg.Targets.IsRegistered(TestConfig.Cfg.Targets.FeedTarget));
-            Assert.True(TestConfig.Cfg.Targets.Of(TestConfig.Cfg.Targets.FeedTarget).HostsFeedStation);
-            Assert.False(TestConfig.Cfg.Targets.Of(TestConfig.Cfg.Targets.FeedTarget).ReceivesRelocatedComponents);
+            // A stand-in has one home to return work to; the relationship names it, so there is no
+            // default to be ambiguous about.
+            foreach (var t in TestConfig.Cfg.Targets.All.Where(t => t.StandsInFor != null))
+            {
+                Assert.True(TestConfig.Cfg.Targets.IsRegistered(t.StandsInFor!.Value));
+                Assert.True(TargetIndex.OwnsRing(TestConfig.Cfg.Targets.Of(t.StandsInFor!.Value)));
+                Assert.False(TargetIndex.OwnsRing(t));
+            }
         }
     }
 }
