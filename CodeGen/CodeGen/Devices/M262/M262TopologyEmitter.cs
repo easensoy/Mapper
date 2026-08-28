@@ -11,21 +11,18 @@ namespace CodeGen.Devices.M262
 {
     public static class M262TopologyEmitter
     {
-        const string FallbackSolutionUuid      = "00000000-0000-0000-0000-000000000000";
-        static Configuration.DeviceIdentity M262Id =>
-            Configuration.DeviceConfig.Identity(CodeGen.Translation.PlcAssignment.Named("M262"));
-
-        internal static string DefaultM262Uuid => M262Id.Equipment;
-        static string DefaultRuntimeUuid => M262Id.Runtime;
-        static string RuntimeDeoTypeId => M262Id.RuntimeType;
+        // The identities come from the DESCRIPTOR of the target being emitted, so a second controller
+        // of this kind is emitted with its own equipment and runtime uuids rather than the first one's.
 
         // Zero UUID = EAE Topology "NOCONF": the IP endpoint is statically bound but not associated
         // with any BroadcastDomain, so the M262dPAC shows its IP in Physical Views with no network.
-        const string NoConfDomainUuid          = "00000000-0000-0000-0000-000000000000";
+        const string NoConfDomainUuid          = Artefacts.EaeAbi.NoBroadcastDomain;
 
-        public static TopologyEmitResult Emit(Configuration.CompilerConfiguration cfg, string sysdevId)
+        public static TopologyEmitResult Emit(Configuration.CompilerConfiguration cfg,
+            CodeGen.Translation.PlcAssignment target, string sysdevId)
         {
             if (cfg == null) throw new ArgumentNullException(nameof(cfg));
+            var self = cfg.Targets.Of(target);
             var result = new TopologyEmitResult();
 
             var eaeRoot = EaeProjectLayout.DeriveEaeProjectRoot(cfg);
@@ -36,8 +33,8 @@ namespace CodeGen.Devices.M262
             }
 
             string solutionId = EaeProjectLayout.ReadProjectGuid(eaeRoot)
-                ?? FallbackSolutionUuid;
-            if (solutionId == FallbackSolutionUuid)
+                ?? Artefacts.EaeAbi.UnknownSolution;
+            if (solutionId == Artefacts.EaeAbi.UnknownSolution)
                 result.Warnings.Add(
                     "Could not read project Guid from General/ProjectInfo.xml; using zero UUID. " +
                     "EAE will reject the security domain unless ProjectInfo.xml is restored.");
@@ -62,7 +59,7 @@ namespace CodeGen.Devices.M262
 
             // Equipment JSON (visual placement) carries no trust info, so it is safe and necessary to
             // rewrite every Test Runtime — else the M262 never appears after the Demonstrator wipe.
-            File.WriteAllText(equipmentFile, BuildEquipmentJson(cfg, sysdevId, solutionId));
+            File.WriteAllText(equipmentFile, BuildEquipmentJson(cfg, self, sysdevId, solutionId));
             result.FilesWritten.Add(Path.GetFileName(equipmentFile));
 
             // solutionData carries the CsConfHash + CertThumbprint trust binding; preserve an existing
@@ -130,17 +127,18 @@ namespace CodeGen.Devices.M262
             catch { /* topologyproj malformed; not fatal */ }
         }
 
-        static string BuildEquipmentJson(Configuration.CompilerConfiguration cfg, string sysdevId, string solutionId) =>
+        static string BuildEquipmentJson(Configuration.CompilerConfiguration cfg,
+            Mapping.TargetDescriptor self, string sysdevId, string solutionId) =>
             TemplateDocument.Load(cfg, @"Topology\Equipment_M262dPAC.json",
                 new System.Collections.Generic.Dictionary<string, string>
                 {
-                    ["EquipmentUuid"] = DefaultM262Uuid,
-                    ["RuntimeUuid"] = DefaultRuntimeUuid,
-                    ["RuntimeTypeId"] = RuntimeDeoTypeId,
+                    ["EquipmentUuid"] = self.Identity.Equipment,
+                    ["RuntimeUuid"] = self.Identity.Runtime,
+                    ["RuntimeTypeId"] = self.Identity.RuntimeType,
                     ["NoConfDomain"] = NoConfDomainUuid,
                     ["SysdevId"] = sysdevId,
                     ["SolutionId"] = solutionId,
-                    ["TargetIp"] = cfg.Devices.M262.TargetIp,
+                    ["TargetIp"] = cfg.Devices.NetworkOf(self.Plc.Name).TargetIp,
                 });
 
         // The .solutionData security payload. The JSON SHAPE below is EAE's own document grammar and
