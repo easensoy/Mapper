@@ -189,7 +189,7 @@ namespace CodeGen.Translation
                     segmentLinks.Add(($"{segment[i]}.stateRprtCmd_out", $"{segment[i + 1]}.stateRprtCmd_in"));
                 // A merged topology closes the segment into this resource's own ring head rather than
                 // handing it across a seam, so on the resource that tail link is local.
-                if (resourceOrder && ring.Count > 0 && ctx.Rings.RingsMerged && caps.HostsFeedRing)
+                if (resourceOrder && ring.Count > 0 && ctx.Rings.RingsMerged && caps.AnchorsMergedRing)
                 {
                     segmentLinks.Add(($"{segment[^1]}.stateRprtCmd_out",
                                       $"{ring[0].Name}.{ctx.Manifest.RingIn(ring[0].Type)}"));
@@ -243,7 +243,7 @@ namespace CodeGen.Translation
 
             if (processes.Count > 0)
             {
-                if (caps.OpensCoverSeam)
+                if (caps.CommandsACarriedChain)
                     seams.Add($"cover detour: {ring[^1].Name} reports across to the carried chain and " +
                               $"{processes[0].Name} is fed back from it — EAE bridges via the canvas");
                 else links.Add(Link(ctx.Manifest, ring[^1], processes[0]));
@@ -252,8 +252,8 @@ namespace CodeGen.Translation
 
                 // The ring leaves this controller either because the carried chain took it across, or
                 // because a merged topology hands it to the next ring host.
-                bool openBoundary = (hasSegment && caps.OpensCoverSeam) ||
-                                    (ctx.Rings.RingsMerged && caps.HostsFeedRing);
+                bool openBoundary = (hasSegment && caps.CommandsACarriedChain) ||
+                                    (ctx.Rings.RingsMerged && caps.AnchorsMergedRing);
                 if (openBoundary)
                     seams.Add($"cross-controller ring: {processes[^1].Name} reports across the seam and " +
                               $"{ring[0].Name} is fed from it — EAE bridges via the canvas");
@@ -261,7 +261,7 @@ namespace CodeGen.Translation
             }
             else if (ring.Count > 1)
             {
-                if (caps.CarriesDetouredChain)
+                if (caps.CarriesACommandedChain)
                     seams.Add($"carried chain {ring[0].Name}…{ring[^1].Name} is OPEN at both ends: " +
                               "another controller commands it");
                 else links.Add(Link(ctx.Manifest, ring[^1], ring[0]));
@@ -324,8 +324,11 @@ namespace CodeGen.Translation
                 ? members.Where(n => Hosted(n) && !Named(segment, n)).Select(Member).ToList()
                 : members.Where(n => Hosted(n) && !Carried(n)).Select(Member).ToList();
 
+            // Asked of the PLAN, not of the declaration: a target that commands a carried chain only
+            // splices one onto its ring when this run actually has a chain to carry. Reading the raw
+            // relationship here pulled a ring-scoped reporter across on a twin that detours nothing.
             if (!resourceOrder && ctx.Targets.IsRegistered(plc) &&
-                ctx.Targets.Of(plc).OpensCoverSeam)
+                ctx.CapabilitiesOf(plc).CommandsACarriedChain)
             {
                 var carriedReporter = contents.Sensors.Select(Name)
                     .FirstOrDefault(n => n.Length > 0 && facts.TakesRingScopedSlot(n));
@@ -379,12 +382,12 @@ namespace CodeGen.Translation
         // The MQTT connection this resource hosts, and whether anything else brings it up.
         private static (string Name, bool Started)? ConnectionOn(GenerationContext ctx, PlcAssignment plc)
         {
-            if (!ctx.Config.MqttPublishEnabled) return null;
+            if (!ctx.Cfg.Telemetry.PublishEnabled) return null;
             var declared = ctx.Cfg.Telemetry.Connections
                 .FirstOrDefault(c => c.Plc == plc);
             return declared == null
                 ? null
-                : (declared.NameFor(ctx.Config.UseTelemetryCat),
+                : (declared.NameFor(ctx.Cfg.Telemetry.UseTelemetryCat),
                    declared.BroughtUpBy != Configuration.ConnectionStarter.None);
         }
     }
