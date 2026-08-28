@@ -137,25 +137,34 @@ namespace MapperTests
         public void A_target_that_hosts_no_process_is_a_detour_only_where_it_declares_one()
         {
             // Running no process of its own is not what makes a target reachable from another: a target
-            // says so, and one that does not is not silently spliced onto a commanding ring.
-            var carriers = TestConfig.Cfg.Targets.All.Where(t => t.CarriesDetouredChain).Select(t => t.Plc).ToList();
+            // names the one that commands its chain, and one that names none is not silently spliced on.
+            var carriers = TestConfig.Cfg.Targets.All
+                .Where(t => t.ChainCommandedBy != null).Select(t => t.Plc).ToList();
             Assert.NotEmpty(carriers);
-            foreach (var t in TestConfig.Cfg.Targets.All.Where(t => t.ReceivesRelocatedComponents))
+            foreach (var t in TestConfig.Cfg.Targets.All.Where(t => t.StandsInFor != null))
                 Assert.DoesNotContain(t.Plc, carriers);
+            // Both ends of the relationship resolve, and the commanding end is DERIVED from the carrying
+            // one - so a chain nobody commands, or a seam nobody carries, cannot be stated at all.
+            foreach (var plc in carriers)
+                Assert.True(TestConfig.Cfg.Targets.CommandsACarriedChain(
+                    TestConfig.Cfg.Targets.Of(plc).ChainCommandedBy!.Value));
         }
 
         [Fact]
         public void Relocation_declares_the_target_it_receives_onto_and_never_falls_back_to_one()
         {
-            // The receiving target is a declared capability, and it is NOT the one hosting the station:
-            // that is what makes "moved here" different from "lives here".
-            var receivers = TestConfig.Cfg.Targets.All.Where(t => t.ReceivesRelocatedComponents).ToList();
-            Assert.NotEmpty(receivers);
-            foreach (var r in receivers)
+            // A stand-in NAMES the target it relieves, so "moved here" and "lives here" are the same
+            // relationship read from its two ends rather than two flags that must be kept in step.
+            var standIns = TestConfig.Cfg.Targets.All.Where(t => t.StandsInFor != null).ToList();
+            Assert.NotEmpty(standIns);
+            foreach (var r in standIns)
             {
-                Assert.True(r.HostsFeedStation,
-                    "a target that receives relocated components hosts the station they came from");
-                Assert.NotEqual(r.Plc, TestConfig.Cfg.Targets.FeedTarget);
+                Assert.NotEqual(r.Plc, r.StandsInFor!.Value);
+                Assert.True(TestConfig.Cfg.Targets.IsRegistered(r.StandsInFor!.Value));
+                // It reports on that target's ring rather than owning one.
+                Assert.False(TargetIndex.OwnsRing(r));
+                Assert.Equal(r.StandsInFor!.Value, TestConfig.Cfg.Targets.RingHostOf(r));
+                Assert.Contains(r.Plc, TestConfig.Cfg.Targets.RingMembers(r.StandsInFor!.Value));
             }
         }
 
@@ -171,12 +180,14 @@ namespace MapperTests
                 Assert.False(string.IsNullOrWhiteSpace(t.DeviceType));
                 Assert.NotEmpty(t.BootFbs);
             }
-            // Exactly one target hosts the station without receiving relocated components, or nothing
-            // could say which ring a feed-side component reports on.
-            Assert.Single(TestConfig.Cfg.Targets.All,
-                t => t.HostsFeedStation && !t.ReceivesRelocatedComponents);
-            // At most one hands the detour out, or a chain would be commanded from two rings.
-            Assert.True(TestConfig.Cfg.Targets.All.Count(t => t.OpensCoverSeam) <= 1);
+            // Every ring has an owner: a stand-in borrows one, and the target it borrows from owns its.
+            foreach (var t in TestConfig.Cfg.Targets.All)
+                Assert.True(TargetIndex.OwnsRing(
+                    TestConfig.Cfg.Targets.Of(TestConfig.Cfg.Targets.RingHostOf(t))));
+            // At most one carried chain per commanding target, or a ring would close across two seams.
+            foreach (var g in TestConfig.Cfg.Targets.All.Where(t => t.ChainCommandedBy != null)
+                         .GroupBy(t => t.ChainCommandedBy!.Value))
+                Assert.Single(g);
         }
     }
 }
