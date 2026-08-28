@@ -41,8 +41,12 @@ namespace CodeGen.Translation.Process.Recipes
             public CatExecution? ExecutionOf(VueOneComponent? c) =>
                 c != null && Execution.TryGetValue((c.Name ?? string.Empty).Trim(), out var e) ? e : null;
 
+            // The type a component is EMITTED as. Actuators resolve per instance from the twin's state
+            // graph, so the plan settled them once and this reads that; a sensor's type follows its ROLE.
             public string CatTypeOf(VueOneComponent c) =>
-                CatType.TryGetValue((c.Name ?? string.Empty).Trim(), out var t) ? t : string.Empty;
+                CatType.TryGetValue((c.Name ?? string.Empty).Trim(), out var t) ? t
+                : ComponentType.IsSensor(c) ? Manifest.SensorType.Name
+                : string.Empty;
 
             public CatProtocol? ProtocolOrNull(VueOneComponent? c) =>
                 c != null && Protocol.TryGetValue((c.Name ?? string.Empty).Trim(), out var p) ? p : null;
@@ -445,16 +449,28 @@ namespace CodeGen.Translation.Process.Recipes
                         $"this recipe already waits for '{target.Name}' at {wait}");
                 else
                 {
-                    // Ask before waiting: a level already true before this PLC started is announced once and
-                    // never again. The name is VERBATIM, not the ring key, as BREQ's claim test is
-                    // case-sensitive. See Docs/PATCH_RATIONALES P-3.
-                    rows.Add(Row.Cmd(target.Name.Trim(), 0, state.StateID));
+                    // ASK BEFORE WAITING, where the type says it can be asked. A level already true
+                    // before this PLC started is announced once and never again, so a type that answers
+                    // an addressed request by reporting even when unchanged is sent one first. WHICH
+                    // command, and how the request addresses the instance, are that type's own
+                    // vocabulary and are declared with it; a type that declares no refresh is not asked
+                    // and the wait relies on a real edge. See Docs/PATCH_RATIONALES P-3.
+                    if (ctx.Manifest.RefreshOf(ctx.CatTypeOf(target)) is { } refresh)
+                        rows.Add(Row.Cmd(AddressOf(target, refresh), refresh.Command, state.StateID));
                     rows.Add(Row.Wait(id, wait, state.StateID));
                     pos[target.ComponentID] = wait;
                     Covered(GuardLeafOutcome.Waited, $"waits for '{target.Name}' at {wait}");
                 }
                 return;
             }
+
+            // How the refresh request names the instance, as the type declares. A type parameterised
+            // with the component's own name cannot be addressed by ring key: the ring's claim test is a
+            // case-sensitive compare, so a lower-cased request would circle unclaimed and change nothing.
+            static string AddressOf(VueOneComponent target, RefreshDeclaration refresh) =>
+                refresh.AddressBy == RefreshAddressing.RingKey
+                    ? Mapping.TemplateMap.RingKey(target.Name)
+                    : (target.Name ?? string.Empty).Trim();
 
             // Everything below is an OBSERVATION: a condition can only add "has REACHED a stop".
             var g = Graph(target, graphs, ctx);
