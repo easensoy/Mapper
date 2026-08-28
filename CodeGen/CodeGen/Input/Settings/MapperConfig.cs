@@ -10,13 +10,6 @@ namespace CodeGen.Configuration
     {
         private const string ConfigFileName = "mapper_config.json";
 
-        // Real rig DI sensors the twin does not model; kept OFF the M262 Feed ring so the report lands only in M580 state_table[id]. The slot is the stableSlot on the sensor's own layout row.
-        public static (string Name, int Id)[] M262SynthSensors =>
-            RigCatalog.Current.SynthSensors
-                .Select(s => (s.Name, Id: Configuration.LayoutCatalog.Load().StableSlotOf(s.Name)))
-                .Where(s => s.Id >= 0)
-                .ToArray();
-
         public string RequireTemplateLibraryPath() => Require(TemplateLibraryPath, nameof(TemplateLibraryPath));
         public string RequireIoFolderPath() => Require(IoFolderPath, nameof(IoFolderPath));
 
