@@ -127,6 +127,67 @@ namespace MapperTests
                 "immutable snapshot, so two parts of one run could see different declarations");
         }
 
+        // The rule above bans reaching for a loader's CACHED SINGLETON. This one bans the other half:
+        // CALLING a loader at all. `MapperConfig.Load()` and `LayoutCatalog.Load()` are ordinary static
+        // methods, so they slipped past the `.Current` pattern entirely - which is how a device emitter
+        // came to resolve its own coupler from whatever bundle happened to be beside the DLL rather than
+        // from the bundle its run was given.
+        //
+        // The exemptions are the two kinds that genuinely cannot be handed a snapshot: the places that
+        // BUILD one, and the entry-point signatures an external binary links by exact shape. Each of the
+        // latter also carries a cfg-taking overload, which is what every in-process caller uses.
+        static readonly string[] MayCallALoader =
+        {
+            "CodeGen/CodeGen/Configuration/CompilerConfiguration.cs",   // builds the snapshot
+            "CodeGen/CodeGen/Application/GenerateProject.cs",           // the composition root
+            "CodeGen/CodeGen/Input/Settings/MapperConfig.cs",           // the loader itself
+            "CodeGen/CodeGen/Mapping/LayoutCatalog.cs",                 // the loader itself
+            "CodeGen/CodeGen/Artefacts/Templates/DemonstratorWiper.cs", // Wipe(string): VueOne runner
+            "CodeGen/CodeGen/Devices/Common/OpcuaCompanionEmitter.cs",  // the two no-cfg entry points
+            "CodeGen/CodeGen/Devices/Common/FoldersXmlEmitter.cs",      // Register(MapperConfig): HMI module
+            "MapperUI/Forms/MainForm.cs",                               // the UI composition root
+        };
+
+        [Fact]
+        public void No_production_code_calls_a_configuration_loader_below_the_composition_root()
+        {
+            var breaches = new List<string>();
+            foreach (var f in Production())
+            {
+                var rel = Rel(f);
+                if (MayCallALoader.Any(a => rel.EndsWith(a, StringComparison.OrdinalIgnoreCase))) continue;
+                foreach (Match m in Regex.Matches(CodeOf(f),
+                             @"MapperConfig[.]Load\(|LayoutCatalog[.]Load\(|CompilerConfiguration[.]Load\("))
+                    breaches.Add(rel + " -> " + m.Value + ")");
+            }
+            NoBreaches(breaches,
+                "a file below the composition root loads a declaration file for itself, so what it " +
+                "resolves comes from the bundle beside the DLL rather than from the bundle its run was given");
+        }
+
+        // AN EXEMPTION IS ONLY HONEST IF IT IS STILL NEEDED. An entry point exempted because an external
+        // binary links its signature must still HAVE that signature and must still offer the cfg-taking
+        // overload every in-process caller uses - otherwise the exemption is just a hole.
+        [Fact]
+        public void Every_loader_exemption_still_names_a_file_that_needs_one()
+        {
+            var breaches = new List<string>();
+            foreach (var rel in MayCallALoader)
+            {
+                var full = Production().FirstOrDefault(f =>
+                    Rel(f).EndsWith(rel, StringComparison.OrdinalIgnoreCase));
+                if (full == null) { breaches.Add(rel + " -> no such production file (stale exemption)"); continue; }
+                var code = CodeOf(full);
+                // Either it CALLS a loader (a composition root or a compat entry point), or it DEFINES
+                // one - a file that does neither has no reason to be exempt from the rule.
+                bool calls = Regex.IsMatch(code, @"(MapperConfig|LayoutCatalog|CompilerConfiguration)[.]Load\(");
+                bool defines = Regex.IsMatch(code, @"(static|public|internal)[^;{]*\bLoad(From)?\s*\(");
+                if (!calls && !defines)
+                    breaches.Add(rel + " -> neither calls nor defines a loader, so the exemption is dead weight");
+            }
+            NoBreaches(breaches, "the loader exemption list carries an entry that no longer justifies itself");
+        }
+
         // ------------------------------------------------------------------------------------
         // The SEMANTIC layers compile against the run they were handed, never a process-wide one.
         // ------------------------------------------------------------------------------------
@@ -278,6 +339,39 @@ namespace MapperTests
         }
 
         // ------------------------------------------------------------------------------------
+        // A device is emitted by ITS OWN BACKEND. Nothing else emits one.
+        //
+        // The template deployer used to emit the feed device, its topology and its hardware config as
+        // well, so one artefact had two owners and the .dfbproj entry a run produced depended on which
+        // of them ran first. Deleting either half changed generated bytes, which is what kept it there.
+        // ------------------------------------------------------------------------------------
+        [Fact]
+        public void Only_a_target_backend_emits_a_device()
+        {
+            var emitters = new[]
+            {
+                "M262SysdevEmitter.Emit", "M262TopologyEmitter.Emit",
+                "Station2DeviceEmitter.EmitM580", "Station2DeviceEmitter.EmitBx1",
+                "RevPiDeviceEmitter.EmitDevice", "HwConfigVerbatimCopier.CopyFor",
+            };
+            var breaches = new List<string>();
+            foreach (var f in Production())
+            {
+                var rel = Rel(f).Replace('\\', '/');
+                // A backend, and the shared emitters they call, are the owners; the composition root
+                // may still ASK a device whether it already exists in order to report it.
+                if (rel.Contains("/Devices/")) continue;
+                var code = CodeOf(f);
+                foreach (var call in emitters)
+                    if (code.Contains(call, StringComparison.Ordinal))
+                        breaches.Add(rel + " -> " + call);
+            }
+            NoBreaches(breaches,
+                "a device is emitted from outside its backend, so one artefact has two owners and the " +
+                "bytes a run produces depend on which of them happened to run first");
+        }
+
+        // ------------------------------------------------------------------------------------
         // No static EAE document body is embedded in C#. A template file owns document structure.
         // ------------------------------------------------------------------------------------
         [Fact]
@@ -372,6 +466,85 @@ namespace MapperTests
             NoBreaches(breaches,
                 "a source file contains a literal backspace, which is almost always a word-boundary " +
                 "escape that was eaten by the tool that wrote it - the regex then matches nothing");
+        }
+
+        // ------------------------------------------------------------------------------------
+        // WHAT EAE FIXES IS SPELLED ONCE.
+        //
+        // The null UUID is four different sentinels, and seven files each spelled it for themselves -
+        // so which meaning any one of them carried could only be read from its surrounding comment.
+        // The same for the vendor's device namespace and its embedded-resource type. These are not
+        // configuration: changing one produces a project EAE will not load, so they stay typed - but
+        // in ONE place, where each meaning is named.
+        // ------------------------------------------------------------------------------------
+        [Fact]
+        public void No_EAE_ABI_identity_is_spelled_outside_the_ABI()
+        {
+            var abi = Path.Combine("CodeGen", "CodeGen", "Artefacts", "Eae", "EaeAbi.cs");
+            var breaches = new List<string>();
+            foreach (var f in Production())
+            {
+                if (Rel(f).EndsWith(abi.Replace(Path.DirectorySeparatorChar, '/'), StringComparison.Ordinal))
+                    continue;
+                var code = CodeOf(f);
+                foreach (Match m in Regex.Matches(code,
+                             "\"(00000000-0000-0000-0000-[0-9a-f]{12}|SE[.]DPAC|EMB_RES_ECO|Runtime[.]Management|SE[.]AppBase)\""))
+                    breaches.Add(Rel(f) + " -> " + m.Value);
+            }
+            NoBreaches(breaches,
+                "an identity EAE fixes is spelled outside the one place that owns it, so which of its " +
+                "meanings a use carries can only be read from the comment beside it");
+        }
+
+        // ------------------------------------------------------------------------------------
+        // A FILE PINNED TO A LINE ENDING ACTUALLY CARRIES IT.
+        //
+        // A raw string literal inherits the newlines of the .cs file it sits in, so for these files the
+        // line ending IS part of the artefact they write. .gitattributes pins them, but a pin only
+        // governs what git checks out - an editor that rewrites a file with the other ending leaves it
+        // pinned and wrong on disk, and the artefact silently changes length. That has now happened
+        // three times, so it is checked rather than remembered.
+        // ------------------------------------------------------------------------------------
+        [Fact]
+        public void Every_file_pinned_to_a_line_ending_carries_it_on_disk()
+        {
+            var attributes = Path.Combine(Root(), ".gitattributes");
+            Assert.True(File.Exists(attributes), ".gitattributes is missing, so nothing pins them");
+
+            var breaches = new List<string>();
+            int pinned = 0;
+            foreach (var raw in File.ReadAllLines(attributes))
+            {
+                var line = raw.Trim();
+                if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal)) continue;
+                var eol = line.Contains("eol=crlf", StringComparison.Ordinal) ? "crlf"
+                        : line.Contains("eol=lf", StringComparison.Ordinal) ? "lf" : null;
+                if (eol == null) continue;
+
+                // A pattern containing a space is quoted; git needs the quotes and so does this.
+                var pattern = line.StartsWith("\"", StringComparison.Ordinal)
+                    ? line[1..line.IndexOf('"', 1)]
+                    : line[..line.IndexOfAny(new[] { ' ', '\t' })];
+                // HMI-owned files are excluded here as they are from every other rule in this file:
+                // that module is separately owned. Two of its pinned files ARE lf on disk against a crlf
+                // pin - a real finding, reported rather than silently fixed from outside the module.
+                if (pattern.Contains("/Hmi/", StringComparison.Ordinal)) continue;
+
+                var path = Path.Combine(Root(), pattern.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(path)) { breaches.Add(pattern + " -> pinned but not present"); continue; }
+
+                pinned++;
+                var bytes = File.ReadAllBytes(path);
+                int crlf = 0, bare = 0;
+                for (int i = 0; i < bytes.Length; i++)
+                    if (bytes[i] == (byte)'\n') { if (i > 0 && bytes[i - 1] == (byte)'\r') crlf++; else bare++; }
+                var actual = bare == 0 ? "crlf" : crlf == 0 ? "lf" : "MIXED";
+                if (actual != eol) breaches.Add($"{pattern} -> pinned {eol}, on disk {actual}");
+            }
+            Assert.True(pinned > 0, ".gitattributes pins no file, so this rule proves nothing");
+            NoBreaches(breaches,
+                "a file whose line endings are part of the artefact it writes does not carry the " +
+                "ending it is pinned to, so the bytes it emits are not the bytes that were reviewed");
         }
 
         static IEnumerable<string> TestSources() =>
