@@ -30,7 +30,7 @@ namespace CodeGen.Translation
 
             _layer = new XElement(Ns + "Layer",
                 new XAttribute("ID", _layerId),
-                new XAttribute("Name", "SMC_Rig"),
+                new XAttribute("Name", Configuration.GenerationConfig.Layer),
                 new XAttribute("Comment", string.Empty),
                 new XAttribute("IsDefault", "true"),
                 new XAttribute(XNamespace.Xmlns + "xsi", Xsi.NamespaceName),
