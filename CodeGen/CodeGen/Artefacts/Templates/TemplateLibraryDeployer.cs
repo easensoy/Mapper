@@ -5,7 +5,6 @@ using System.Linq;
 using System.Xml.Linq;
 using CodeGen.Configuration;
 using CodeGen.Translation;
-using CodeGen.Devices.M262;
 using static CodeGen.Services.TemplateArtifactDeployer;
 using static CodeGen.Services.FbtXmlEditor;
 using static CodeGen.Services.HmiTemplatePatcher;
@@ -97,18 +96,21 @@ namespace CodeGen.Services
                 result.PatchesApplied.Add("PLC_RW_BX1: decode the EtherNet/IP input word at INIT so the cover "
                     + "change detector sees the real bits at power-on, not one scan later.");
             CodeGen.Devices.BX1.Bx1IoBrokerInjector.EmbedCoverBridgeInComposite(cfg, brokerFbt);
-            // Forces cover_hr HOME on start only; EAE Clean/STOP still needs the TM3BC ToHome fallback 16#0002.
-            if (CodeGen.Devices.BX1.Bx1IoBrokerInjector.InjectCoverFailsafeIntoBrokerType(eaeProjectDir))
-                result.Warnings.Add("[Deploy][BX1] CoverPNP_Hr safe-start gate (Bx1CoverFailsafe) " +
-                    "inserted into PLC_RW_BX1 — cover_hr forced HOME on every start.");
+            // Forces the declared safe-start actuator HOME on start only; EAE Clean/STOP still needs the
+            // TM3BC output fallback the scanner validator prints from the same resolved plan.
+            var safeStart = CodeGen.Devices.BX1.Bx1SafeStart.Resolve(cfg);
+            if (CodeGen.Devices.BX1.Bx1IoBrokerInjector.InjectCoverFailsafeIntoBrokerType(cfg, eaeProjectDir))
+                result.Warnings.Add($"[Deploy][BX1] {safeStart.Component} safe-start gate (Bx1CoverFailsafe) " +
+                    $"inserted into PLC_RW_BX1 — {safeStart.Component} forced HOME on every start.");
 
             // Without the broker type EAE cannot instantiate RevPI_IO; pure M262 mode never deploys it.
             if (ctx.Profile.HasAssignments)
             {
                 DeployArtifact(libPath, "Composite", "PLC_RW_REVPI", eaeProjectDir, result, isBasic: false);
                 // Internalise the Modbus symlink bridge so the RevPi sysres instantiates only RevPI_IO.
-                    CodeGen.Devices.RevPi.RevPiIoBrokerInjector.EmbedBridgeInComposite(
-                        Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_REVPI.fbt"), ctx.Targets);
+                CodeGen.Devices.RevPi.RevPiIoBrokerInjector.EmbedBridgeInComposite(
+                    cfg, ctx.Profile.Assignments.Values.First(),
+                    Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_REVPI.fbt"));
 
             }
 
@@ -187,82 +189,6 @@ namespace CodeGen.Services
             RegisterInDfbproj(eaeProjectDir, cfg, result);
 
             VerifyArraySizeConsistency(eaeProjectDir, result);
-
-            // NOTE: M262Backend emits this same device, topology and hardware config in the backend pass,
-            // so there are two owners for one artefact. Collapsing onto the backend was tried and REVERTED:
-            // emitting later moves the M262 entries in IEC61499.dfbproj, which is a generated-byte change.
-            // Removing it needs the dfbproj registration to be order-independent first.
-
-            // Trust-preservation guard: when an M262 sysdev exists, device-layer writes are skipped; application content still runs.
-            bool m262DeviceExists = M262SysdevEmitter.M262SysdevAlreadyExists(cfg);
-
-            string sysdevId = string.Empty;
-            try
-            {
-                var sysdev = M262SysdevEmitter.Emit(ctx);
-                result.SysdevPath = sysdev.SysdevPath;
-                result.SystemFilePath = sysdev.SystemFilePath;
-                result.MappingsAdded = sysdev.MappingsAdded;
-                sysdevId = EaeProjectLayout.ReadSysdevId(sysdev.SysdevPath);
-                if (sysdev.DevicePreserved)
-                {
-                    MapperLogger.Info(
-                        "[Device] M262 sysdev exists, skipping device creation and " +
-                        "config writes to preserve trust binding");
-                    MapperLogger.Info("[Device] M262 sysdev preserved (trust binding intact)");
-                }
-                else
-                {
-                    MapperLogger.Info(
-                        $"[Deploy] sysdev rewritten as M262_dPAC; {sysdev.MappingsAdded} APP→RES0 mapping(s) ensured");
-                }
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"M262 sysdev emit failed: {ex.Message}");
-            }
-
-            if (m262DeviceExists)
-            {
-                MapperLogger.Info(
-                    "[Device] M262 sysdev exists, skipping Topology Equipment JSON " +
-                    "and network-profile writes to preserve trust binding");
-            }
-            else
-            {
-                try
-                {
-                    var topo = M262TopologyEmitter.Emit(cfg, sysdevId);
-                    MapperLogger.Info(
-                        $"[Deploy] Topology emitted: {topo.FilesWritten.Count} files, " +
-                        $"{topo.TopologyProjEntriesAdded} topologyproj entries added");
-                    foreach (var w in topo.Warnings)
-                        result.Warnings.Add($"Topology: {w}");
-                }
-                catch (Exception ex)
-                {
-                    result.Warnings.Add($"M262 topology emit failed: {ex.Message}");
-                }
-            }
-
-            try
-            {
-                // The feed host's authored hardware config. Which target that is, and which file it
-                // uses, are both declared; this stage copies whatever they name.
-                var feed = ctx.Targets.FeedTarget;
-                var hcf = HwConfigVerbatimCopier.CopyFor(
-                    cfg, feed, cfg.Paths.HcfTemplatesByFileName.TryGetValue(
-                        ctx.Targets.Of(feed).HcfTemplate ?? string.Empty, out var authored)
-                        ? authored : null);
-                result.HcfPath = hcf.HcfPath;
-                foreach (var w in hcf.Warnings)
-                    result.Warnings.Add($"HCF: {w}");
-                MapperLogger.Info($"[Deploy] hcf copied from baseline; {hcf.ParametersOverwritten.Count} channel parameter(s) overwritten");
-            }
-            catch (Exception ex)
-            {
-                result.Warnings.Add($"M262 hcf copy failed: {ex.Message}");
-            }
 
             result.Success = true;
             return result;
@@ -529,11 +455,7 @@ namespace CodeGen.Services
         public List<string> Warnings { get; set; } = new();
         public int FilesExtracted { get; set; }
         public int FilesSkipped { get; set; }
-
-        public string? SysdevPath { get; set; }
-        public string? SystemFilePath { get; set; }
-        public int MappingsAdded { get; set; }
-
         public string? HcfPath { get; set; }
+
     }
 }
