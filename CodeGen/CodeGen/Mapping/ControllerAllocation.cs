@@ -26,7 +26,6 @@ namespace CodeGen.Mapping
 
         public PlcAssignment Of(string? componentName) => Lookup(componentName)?.Plc ?? PlcAssignment.Unknown;
 
-        // Is this component hosted by whichever controller runs the Feed station (M262 or the RevPi)?
 
         private ComponentEntry? Lookup(string? componentName)
         {
