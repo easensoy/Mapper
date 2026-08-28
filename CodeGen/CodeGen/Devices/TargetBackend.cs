@@ -22,7 +22,12 @@ namespace CodeGen.Devices
         // The components this target's own hardware can serve, or empty when it serves whatever the
         // roster puts on it. A coupler carries the channels it carries, so the answer is the TARGET's -
         // the UI and the validator both ask here rather than each naming a particular injector.
-        System.Collections.Generic.IReadOnlySet<string> ServableComponents { get; }
+        //
+        // It takes the run's declarations because the coupler is resolved from the library THAT run
+        // points at: as a stored property it was resolved once per process and every later run,
+        // whatever bundle it held, was handed the first one's answer.
+        System.Collections.Generic.IReadOnlySet<string> ServableComponents(
+            Configuration.CompilerConfiguration cfg);
 
         // Whether this target can actually serve what the run assigned to it. Its own hardware decides -
         // a coupler carries the channels it carries - so the answer lives with the target rather than in
@@ -83,7 +88,8 @@ namespace CodeGen.Devices
         public abstract PlcAssignment Target { get; }
 
         // Most targets serve whatever the roster puts on them; only one with its own IO contract lists.
-        public virtual System.Collections.Generic.IReadOnlySet<string> ServableComponents { get; } =
+        public virtual System.Collections.Generic.IReadOnlySet<string> ServableComponents(
+            Configuration.CompilerConfiguration cfg) =>
             new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
 
         // Most targets serve whatever the roster puts on them; only one with its own IO contract says no.
