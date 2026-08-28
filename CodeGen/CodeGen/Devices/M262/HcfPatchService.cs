@@ -12,13 +12,16 @@ namespace CodeGen.Devices.M262
 {
     public static class HcfPatchService
     {
-        public static void PatchDeployed(GenerationContext ctx, IoBindings? bindings,
+        public static void PatchDeployed(GenerationContext ctx, PlcAssignment target, IoBindings? bindings,
             SystemInjector.BindingApplicationReport report)
         {
-            PatchDeployed(ctx.Cfg, ctx.Profile, bindings, report);
+            PatchDeployed(ctx.Cfg, target, ctx.Profile, bindings, report);
         }
 
-        public static void PatchDeployed(Configuration.CompilerConfiguration? config, DeploymentProfile profile,
+        // The device whose channels this binds is the one whose backend is running, read from its own
+        // descriptor: matched by a name it bound whichever device happened to carry that type.
+        public static void PatchDeployed(Configuration.CompilerConfiguration? config, PlcAssignment target,
+            DeploymentProfile profile,
             IoBindings? bindings,
             SystemInjector.BindingApplicationReport report)
         {
@@ -37,7 +40,7 @@ namespace CodeGen.Devices.M262
                     return;
                 }
 
-                var loc = LocateM262SysdevAndResource(config, eaeRoot);
+                var loc = LocateSysdevAndResource(config, target, eaeRoot);
                 if (loc == null)
                 {
                     report.Missing.Add(
@@ -71,7 +74,8 @@ namespace CodeGen.Devices.M262
                     }
                 }
                 var sensorNames = ReadSensorNames(sysresPath, config);
-                WriteHcfMerged(config, profile, hcfPath, resourceId, bindings, fbIdByName, sensorNames, report);
+                WriteHcfMerged(config, target, profile, hcfPath, resourceId, bindings, fbIdByName,
+                    sensorNames, report);
 
                 report.Missing.Add($"[Hcf] wrote   ← {hcfPath}");
             }
@@ -81,8 +85,8 @@ namespace CodeGen.Devices.M262
             }
         }
 
-        private static (string sysdevDir, string resourceId, string sysresPath)? LocateM262SysdevAndResource(
-            Configuration.CompilerConfiguration cfg,string eaeRoot)
+        private static (string sysdevDir, string resourceId, string sysresPath)? LocateSysdevAndResource(
+            Configuration.CompilerConfiguration cfg, PlcAssignment target, string eaeRoot)
         {
             var systemDir = Path.Combine(eaeRoot, "IEC61499", "System");
             if (!Directory.Exists(systemDir)) return null;
@@ -95,7 +99,7 @@ namespace CodeGen.Devices.M262
                     if (root == null || root.Name.LocalName != "Device") continue;
                     var type = (string?)root.Attribute("Type") ?? string.Empty;
                     var nspace = (string?)root.Attribute("Namespace") ?? string.Empty;
-                    if (type != cfg.Targets.Of(CodeGen.Translation.PlcAssignment.Named("M262")).DeviceType || nspace != TargetDescriptor.DeviceNamespace) continue;
+                    if (type != cfg.Targets.Of(target).DeviceType || nspace != TargetDescriptor.DeviceNamespace) continue;
                     XNamespace ns = root.GetDefaultNamespace();
                     var resources = root.Element(ns + "Resources");
                     var m262Res = resources?.Elements(ns + "Resource").FirstOrDefault();
@@ -129,6 +133,7 @@ namespace CodeGen.Devices.M262
 
         // Idempotent merge into the deployed .hcf; ParameterValue targets are {resourceId}.{fbId}.{port}.
         private static void WriteHcfMerged(Configuration.CompilerConfiguration cfg,
+            PlcAssignment target,
             DeploymentProfile profile, string hcfPath, string resourceId,
             IoBindings? bindings, Dictionary<string, string> fbIdByName,
             List<string> sensorNames,
@@ -233,7 +238,7 @@ namespace CodeGen.Devices.M262
             // The bus this device carries, module by module, in the order device.yml declares it. The
             // XML SHAPE is EAE's schema and is written by ModuleBlock; WHICH modules there are, their
             // frozen ids, their properties and which of them takes channel bindings are all declared.
-            var modules = cfg.Targets.Of(cfg.Targets.FeedTarget).HardwareModules;
+            var modules = cfg.Targets.Of(target).HardwareModules;
             XElement into = devItem;
             string? previous = null;
             foreach (var m in modules)
