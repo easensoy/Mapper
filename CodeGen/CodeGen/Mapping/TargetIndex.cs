@@ -18,14 +18,20 @@ namespace CodeGen.Mapping
         // Disambiguates two targets sharing a DeviceType; null when the Type is unique.
         string? DeviceName,
         string HcfTemplate,
-        bool HostsFeedStation,
+        // The EAE identities this device is emitted with - sysdev, resource, equipment, runtime and the
+        // sub-equipment a wire attaches to. On the DESCRIPTOR because they belong to the target, not to
+        // the emitter: read through a static keyed on a controller name, a second target of the same
+        // kind could only ever be emitted with the first one's ids.
+        Configuration.DeviceIdentity Identity,
         bool DeviceLocalCanvas,
-        // Receives components relocated off another target, so they must not be swept from its sysres.
-        bool ReceivesRelocatedComponents,
-        // Hands the cover detour out to another target; its ring closes across the seam, not locally.
-        bool OpensCoverSeam,
-        // Carries a chain another target commands, so it is open at both ends.
-        bool CarriesDetouredChain,
+        // The target this one stands in for, or null. A stand-in takes over components moved off that
+        // target: it shares that target's report ring rather than owning one, its sysres is never swept
+        // of what was moved onto it, and it is emitted only when this run actually moves something.
+        Translation.PlcAssignment? StandsInFor,
+        // The target that commands this one's chain, or null. Its components splice onto that target's
+        // ring, so the chain is open at BOTH ends here. The other end - the seam the commander opens -
+        // is DERIVED from this, so the two ends cannot be declared inconsistently.
+        Translation.PlcAssignment? ChainCommandedBy,
         // The IO broker FB this target hosts, or null. Ownership of an emitted FB that is not a plant
         // component: without it the mirror has no way to say which resource such an FB belongs on.
         string? IoBroker,
@@ -44,7 +50,7 @@ namespace CodeGen.Mapping
         IReadOnlyList<BootFbSpec> BootFbs)
     {
         // Every EAE device the Mapper emits lives in the same vendor namespace.
-        public const string DeviceNamespace = "SE.DPAC";
+        public const string DeviceNamespace = Artefacts.EaeAbi.DeviceNamespace;
     }
 
     // One boot FB, fully specified: what it is (role, type, namespace, parameters, order) joined to who
@@ -141,14 +147,18 @@ namespace CodeGen.Mapping
                     "device.yml targets do not match the supported backends:" + Environment.NewLine +
                     "  - " + string.Join(Environment.NewLine + "  - ", errors));
 
+            // A relationship names a target; validation has already refused one that names nothing.
+            static Translation.PlcAssignment? Related(string? name) =>
+                string.IsNullOrWhiteSpace(name) ? null : Translation.PlcAssignment.Named(name);
+
             // In DECLARATION order: every target is both declared and implemented by now, and the order a
             // descriptor list is walked in reaches artefacts, so it is the declaration that fixes it.
             return declared.Select(d => new TargetDescriptor(
                 d.Plc, d.ResourceName, d.DeviceType,
                 string.IsNullOrWhiteSpace(d.DeviceName) ? null : d.DeviceName,
                 d.HcfTemplate,
-                d.HostsFeedStation, d.DeviceLocalCanvas, d.ReceivesRelocatedComponents,
-                d.OpensCoverSeam, d.CarriesDetouredChain,
+                d.Identity,
+                d.DeviceLocalCanvas, Related(d.StandsInFor), Related(d.ChainCommandedBy),
                 string.IsNullOrWhiteSpace(d.IoBroker) ? null : d.IoBroker!.Trim(),
                 d.SimulationDeployPort, d.SimulationArchivePort,
                 d.HardwareModules,
@@ -293,21 +303,25 @@ namespace CodeGen.Mapping
 
         public IReadOnlyList<TargetDescriptor> All => _targets;
 
-        /// The controller that runs the Feed station when nothing has relocated it.
-        public PlcAssignment FeedTarget =>
-            _targets.First(t => t is { HostsFeedStation: true, ReceivesRelocatedComponents: false }).Plc;
+        /// Which target OWNS a report ring. A stand-in does not: it takes over components moved off
+        /// another target, and the components moved while the ring they report on did not. Three passes
+        /// used to spell this out for themselves - a capability, a planner and a frame owner - so they
+        /// could disagree about where a relocated component's reports circulate.
+        public static bool OwnsRing(TargetDescriptor t) => t.StandsInFor == null;
 
-        /// Which target OWNS a station's ring. A target that merely RECEIVES components relocated off
-        /// another one is not that ring's host: the components moved, their station did not. Three
-        /// passes used to spell this out for themselves - a capability, a planner and a frame owner -
-        /// so they could disagree about where a relocated component's reports circulate.
-        public static bool OwnsRing(TargetDescriptor t) => !t.ReceivesRelocatedComponents;
+        /// The target whose ring this one reports on: its own, or the one it stands in for.
+        public PlcAssignment RingHostOf(TargetDescriptor t) => t.StandsInFor ?? t.Plc;
 
-        /// The target hosting the same station as this one, without receiving anything onto it.
-        public PlcAssignment RingHostOf(TargetDescriptor t) =>
-            OwnsRing(t) ? t.Plc
-                : _targets.FirstOrDefault(o => o.HostsFeedStation == t.HostsFeedStation && OwnsRing(o))?.Plc
-                  ?? t.Plc;
+        /// The targets that report on ONE ring: a ring owner and every stand-in that shares it. This is
+        /// the native partition, before any chain a run decides to carry across a boundary.
+        public IReadOnlyList<PlcAssignment> RingMembers(PlcAssignment host) =>
+            _targets.Where(t => RingHostOf(t) == host).Select(t => t.Plc).ToList();
+
+        /// Whether this target commands a chain another one carries, which is what makes its own ring
+        /// close across the seam rather than locally. Declared at the carrying end and derived here, so
+        /// a chain nobody commands - or a seam nobody carries - cannot be stated at all.
+        public bool CommandsACarriedChain(PlcAssignment plc) =>
+            _targets.Any(t => t.ChainCommandedBy == plc);
 
         /// The boot FBs a resource brings up, joined to where layout.yml draws each one.
         public IReadOnlyList<SystemFbSpec> BootFor(PlcAssignment plc, LayoutCatalog layout) =>
