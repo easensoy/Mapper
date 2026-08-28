@@ -20,6 +20,7 @@ namespace CodeGen.Devices.BX1
         public static Result Validate(Configuration.CompilerConfiguration cfg, string eaeRoot)
         {
             var r = new Result();
+            var safeStart = Bx1SafeStart.Resolve(cfg);
             if (string.IsNullOrEmpty(eaeRoot) || !Directory.Exists(eaeRoot))
             { r.Lines.Add("[BX1][Scanner] eaeRoot not found — scanner not validated."); return r; }
 
@@ -44,7 +45,7 @@ namespace CodeGen.Devices.BX1
                     r.Fatal = true;
                     r.Lines.Add($"[BX1][Scanner] FATAL — {Path.GetFileName(s)} is MISSING the {CouplerIp(cfg)} " +
                         "coupler (outputObjectID 1025). EAE would compile an EMPTY scanner and the cover " +
-                        "I/O / CoverPNP_Hr safe-start would never reach the TM3BC. Refusing to complete.");
+                        $"I/O / {safeStart.Component} safe-start would never reach the TM3BC. Refusing to complete.");
                 }
                 else
                 {
@@ -53,7 +54,7 @@ namespace CodeGen.Devices.BX1
                 }
             }
 
-            // Warn, not fatal: homing CoverPNP_Hr on EAE Clean/Stop/fault needs the TM3BC coupler's own
+            // Warn, not fatal: homing the safe-start actuator on Clean/Stop/fault needs the coupler's own
             // output fallback, set at the coupler. No EAE-owned file carries an output-fallback field.
             if (anyCoupler)
                 EmitCoverCleanFallbackNotice(cfg, r);
@@ -67,8 +68,8 @@ namespace CodeGen.Devices.BX1
                     r.Lines.Add($"[BX1][Scanner] WARN — compiled {Rel(eaeRoot, eip)} is EMPTY/stale " +
                         $"({len} bytes; coupler {(txt.Contains(CouplerIp(cfg)) ? "present" : "ABSENT")}). EAE has " +
                         "not rebuilt it from the valid source. Cover I/O (and the cover safe-start) is DEAD " +
-                        "until a clean Build: close EAE -> Clean -> Build. Until then cover_hr cannot be " +
-                        "commanded OR homed by the logic.");
+                        $"until a clean Build: close EAE -> Clean -> Build. Until then {safeStart.Component} " +
+                        "cannot be commanded OR homed by the logic.");
             }
             return r;
         }
@@ -78,21 +79,12 @@ namespace CodeGen.Devices.BX1
         static void EmitCoverCleanFallbackNotice(Configuration.CompilerConfiguration cfg, Result r)
         {
             const string T = "[BX1][Cover-Clean] ";
-            var io = cfg.Devices.Bx1Io;
-            string safe = io.SafeStartComponent;
-            // The word that leaves the safe-start actuator's ToHome coil energised and every other coil off.
-            var coils = io.Covers
-                .SelectMany(c => new[] { (c.Component, Coil: c.CoilToWork, Home: false),
-                                         (c.Component, Coil: c.CoilToHome, Home: true) })
-                .Where(x => x.Coil != null)
-                .OrderBy(x => x.Coil!.Bit)
-                .ToList();
-            int word = coils
-                .Where(x => x.Home && string.Equals(x.Component, safe, System.StringComparison.OrdinalIgnoreCase))
-                .Aggregate(0, (w, x) => w | (1 << x.Coil!.Bit));
-            string bits = string.Join("   ", coils.Select(x =>
-                $"bit{x.Coil!.Bit} {x.Coil.Signal}=" +
-                ((word & (1 << x.Coil.Bit)) != 0 ? "1" : "0")));
+            var plan = Bx1SafeStart.Resolve(cfg);
+            string safe = plan.Component;
+            int word = plan.FallbackWord;
+            string bits = string.Join("   ", plan.Coils.Select(x =>
+                $"bit{x.Signal.Bit} {x.Signal.Signal}=" +
+                ((word & (1 << x.Signal.Bit)) != 0 ? "1" : "0")));
             r.Lines.Add(T + "**************************************************************************");
             r.Lines.Add(T + "MANUAL COUPLER SETTING REQUIRED — the Mapper CANNOT generate this.");
             r.Lines.Add(T + $"Bx1CoverFailsafe homes {safe} only while the BX1 logic RUNS " +
