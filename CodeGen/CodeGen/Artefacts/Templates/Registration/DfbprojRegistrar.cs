@@ -157,8 +157,17 @@ namespace CodeGen.Devices.Core
             return 1;
         }
 
+        // EAE's own device-type token for a PC-hosted runtime. Vendor vocabulary, so it is typed here
+        // rather than declared: device.yml says WHICH type a target is, the schema says what the token is.
+        const string SoftDpacDeviceType = "Soft_dPAC";
+
         // Registers a .sysdev (<Compile SystemDevice>) plus its sibling .hcf/Properties.xml, DependentUpon it.
-        public static int RegisterSystemDevice(string dfbprojPath, string eaeProjectDir, string sysdevPath)
+        //
+        // `target` is the descriptor of the device being registered, when there is one. It decides the two
+        // registration shapes below from what the device IS rather than from which sysdev GUID it carries:
+        // a null descriptor is a device with no target row (the HMI panel), which takes neither shape.
+        public static int RegisterSystemDevice(string dfbprojPath, string eaeProjectDir, string sysdevPath,
+            Mapping.TargetDescriptor? target = null)
         {
             if (!File.Exists(dfbprojPath)) return 0;
             if (!File.Exists(sysdevPath)) return 0;
@@ -177,19 +186,22 @@ namespace CodeGen.Devices.Core
 
             // The .sysdev must be DependentUpon the parent .system: TopologyManager binds Logical Device ->
             // System through it, else Deploy & Diagnostic filters the sysdev out as orphaned.
-            const string SystemFileName = "00000000-0000-0000-0000-000000000000.system";
             Add(cg, ns, "Compile", sysdevRel, ref added,
-                new XElement(ns + "DependentUpon", SystemFileName),
+                new XElement(ns + "DependentUpon", Artefacts.EaeAbi.SystemFileName),
                 new XElement(ns + "IEC61499Type", "SystemDevice"));
 
-            // Siblings go under <None SystemDevice>, EXCEPT the Soft_dPACs (…0004 BX1, …0005 RevPi), whose
-            // .sysres must be <Compile SystemResource> or EAE compiles no HWConfig for them — the BX1 scanner
-            // exports empty and the RevPi deploys with no I/O. M262/M580 keep the rig-proven legacy <None>.
-            bool isBx1Resource = sysdevFileName.StartsWith(
-                CodeGen.Devices.Core.Station2DeviceEmitter.BX1SysdevId, StringComparison.OrdinalIgnoreCase);
-            bool isRevPiResource = sysdevFileName.StartsWith(
-                CodeGen.Devices.RevPi.RevPiDeviceEmitter.SysdevId, StringComparison.OrdinalIgnoreCase);
-            bool isSoftDpacResource = isBx1Resource || isRevPiResource;
+            // Siblings go under <None SystemDevice>, EXCEPT a SOFT dPAC, whose .sysres must be
+            // <Compile SystemResource> or EAE compiles no HWConfig for it — the scanner exports empty and
+            // the device deploys with no I/O. A real dPAC keeps the rig-proven legacy <None>.
+            //
+            // Both shapes are decided from the device's own DECLARATION rather than from its sysdev GUID:
+            // keyed on two GUIDs, a third Soft dPAC would silently get the wrong registration and deploy
+            // with no hardware config at all.
+            bool isSoftDpacResource = string.Equals(target?.DeviceType, SoftDpacDeviceType,
+                StringComparison.OrdinalIgnoreCase);
+            // A device whose hardware config drives an EtherNet/IP scanner additionally needs its .hcf as
+            // <Content>, or EAE exports the scanner with no coupler in it.
+            bool exportsEtherNetIpScanner = !string.IsNullOrWhiteSpace(target?.EtherNetIpDeviceType);
             if (Directory.Exists(sysdevFolder))
             {
                 foreach (var sibling in Directory.EnumerateFiles(sysdevFolder, "*.*", SearchOption.TopDirectoryOnly))
@@ -214,7 +226,7 @@ namespace CodeGen.Devices.Core
                         new XElement(ns + "IEC61499Type", "SystemDevice"),
                         new XElement(ns + "DependentUpon", sysdevFileName));
 
-                    if (ext == ".hcf" && isBx1Resource)
+                    if (ext == ".hcf" && exportsEtherNetIpScanner)
                         Add(cg, ns, "Content", rel, ref added,
                             new XElement(ns + "IEC61499Type", "SystemDevice"),
                             new XElement(ns + "DependentUpon", sysdevFileName));
@@ -232,11 +244,41 @@ namespace CodeGen.Devices.Core
                         StringComparison.OrdinalIgnoreCase))
                     continue;
                 if (compile.Elements(ns + "DependentUpon").Any()) continue;
-                compile.AddFirst(new XElement(ns + "DependentUpon", SystemFileName));
+                compile.AddFirst(new XElement(ns + "DependentUpon", Artefacts.EaeAbi.SystemFileName));
                 backfilled++;
             }
 
             if (added > 0 || removed > 0 || backfilled > 0) Save(xml, dfbprojPath);
+            return added;
+        }
+
+        // ONE file that belongs to a device folder, registered by whatever wrote it.
+        //
+        // RegisterSystemDevice picks up siblings by scanning the folder, which only registers what was
+        // already on disk when the device was emitted. A stage that writes into that folder AFTERWARDS
+        // has to say so: relying on some later pass re-scanning is a side effect, not an owner, and it
+        // silently stops working the moment that pass is removed or the device is preserved.
+        public static int RegisterDeviceArtefact(string? eaeProjectDir, string artefactPath)
+        {
+            if (string.IsNullOrEmpty(eaeProjectDir) || !File.Exists(artefactPath)) return 0;
+            var iec = Path.Combine(eaeProjectDir, "IEC61499");
+            var dfbprojPath = Path.Combine(iec, "IEC61499.dfbproj");
+            if (!File.Exists(dfbprojPath)) return 0;
+
+            // The device folder is named after its .sysdev, which is what the entry must depend on.
+            var folder = Path.GetDirectoryName(artefactPath);
+            if (folder == null) return 0;
+            var sysdevFileName = Path.GetFileName(folder) + ".sysdev";
+            if (!File.Exists(Path.Combine(Path.GetDirectoryName(folder)!, sysdevFileName))) return 0;
+
+            var xml = XDocument.Load(dfbprojPath);
+            var ns = xml.Root!.GetDefaultNamespace();
+            var (_, ng) = Groups(xml, ns);
+            int added = 0;
+            Add(ng, ns, "None", Path.GetRelativePath(iec, artefactPath).Replace('/', '\\'), ref added,
+                new XElement(ns + "IEC61499Type", "SystemDevice"),
+                new XElement(ns + "DependentUpon", sysdevFileName));
+            if (added > 0) Save(xml, dfbprojPath);
             return added;
         }
 
@@ -249,7 +291,7 @@ namespace CodeGen.Devices.Core
             var (cg, _) = Groups(xml, ns);
             int added = 0;
 
-            const string SystemId   = "00000000-0000-0000-0000-000000000000";
+            const string SystemId   = Artefacts.EaeAbi.SystemId;
             const string AppId      = ApplicationShellEmitter.AppId;
             const string SystemFile = SystemId + ".system";
             const string SyslayFile = SystemId + ".syslay";
