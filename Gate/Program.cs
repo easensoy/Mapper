@@ -333,13 +333,14 @@ internal static class Program
                 // selects it. And where the target's hardware declares which components it can serve,
                 // the plant's two components take those names - the plant itself is the same either
                 // way. Both are declared capabilities, so nothing here names a controller.
-                bool relocated = Declarations.Targets.Of(PlcAssignment.Named(target)).ReceivesRelocatedComponents;
+                var descriptor = Declarations.Targets.Of(PlcAssignment.Named(target));
+                bool relocated = descriptor.StandsInFor != null;
                 var names = relocated
                     ? PlacementFixture.Write(control,
-                        RevPiIoBrokerInjector.CoveredActuators.FirstOrDefault(),
-                        RevPiIoBrokerInjector.CoveredSensors.FirstOrDefault())
+                        RevPiIoBrokerInjector.CoveredActuators(Declarations).FirstOrDefault(),
+                        RevPiIoBrokerInjector.CoveredSensors(Declarations).FirstOrDefault())
                     : PlacementFixture.Write(control);
-                var rostered = relocated ? Declarations.Targets.FeedTarget.ToString() : target;
+                var rostered = relocated ? descriptor.StandsInFor!.Value.ToString() : target;
                 var selection = relocated ? names : Array.Empty<string>();
 
                 File.WriteAllText(layoutPath, WithFixtureOn(Encoding.UTF8.GetString(original), rostered, names));
