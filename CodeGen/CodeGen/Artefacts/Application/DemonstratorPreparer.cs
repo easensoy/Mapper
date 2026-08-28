@@ -42,7 +42,7 @@ namespace CodeGen.Artefacts
             foreach (var sysresPath in ResolveActualSysresPaths(config))
                 CleanFile(sysresPath, "FBNetwork", report, config.Manifest);
 
-            CleanM262SysdevResources(config, report);
+            CleanSysdevResources(config, report);
 
             SweepBridgeFbsFromAllSysres(config, report);
 
@@ -120,8 +120,12 @@ namespace CodeGen.Artefacts
                 yield return f;
         }
 
-        // Dedup <Resource> entries in the M262 sysdev (first survives); each dropped Resource's sibling .sysres is deleted, the .hcf left alone.
-        private static void CleanM262SysdevResources(Configuration.CompilerConfiguration config, CleanupReport report)
+        // Dedup <Resource> entries in EVERY declared device's sysdev (first survives); each dropped
+        // Resource's sibling .sysres is deleted, the .hcf left alone. A device carrying two resources is
+        // what EAE reports as "contains 2 instances of EMB_RES_ECO", and it was only ever checked on one
+        // controller because the pass asked for "the feed target" rather than for the devices this run
+        // declares - so the same fault on any other device shipped unnoticed.
+        private static void CleanSysdevResources(Configuration.CompilerConfiguration config, CleanupReport report)
         {
             void Log(string line) => report.DeviceCleanupLog.Add($"[CleanDevice] {line}");
 
@@ -139,33 +143,33 @@ namespace CodeGen.Artefacts
                 return;
             }
 
-            string? sysdevPath = null;
+            var declaredTypes = new HashSet<string>(
+                config.Targets.All.Select(t => t.DeviceType), StringComparer.Ordinal);
+            var sysdevs = new List<string>();
             foreach (var candidate in Directory.EnumerateFiles(
                 systemDir, "*.sysdev", SearchOption.AllDirectories))
             {
                 try
                 {
-                    var doc = XDocument.Load(candidate);
-                    var root = doc.Root;
+                    var root = XDocument.Load(candidate).Root;
                     if (root == null) continue;
                     var type  = (string?)root.Attribute("Type")      ?? string.Empty;
                     var nspac = (string?)root.Attribute("Namespace") ?? string.Empty;
-                    if (string.Equals(type, config.Targets.Of(config.Targets.FeedTarget).DeviceType,
-                            StringComparison.Ordinal) &&
+                    if (declaredTypes.Contains(type) &&
                         string.Equals(nspac, TargetDescriptor.DeviceNamespace, StringComparison.Ordinal))
-                    {
-                        sysdevPath = candidate;
-                        break;
-                    }
+                        sysdevs.Add(candidate);
                 }
                 catch { /* skip malformed; keep scanning */ }
             }
-            if (sysdevPath == null)
+            if (sysdevs.Count == 0)
             {
-                Log($"no M262 sysdev found under {systemDir}; nothing to dedupe");
+                Log($"no declared device's sysdev found under {systemDir}; nothing to dedupe");
                 return;
             }
+            foreach (var path in sysdevs) Dedupe(path);
 
+            void Dedupe(string sysdevPath)
+            {
             Log($"reading sysdev at {sysdevPath}");
 
             XDocument sysdevDoc;
@@ -200,13 +204,13 @@ namespace CodeGen.Artefacts
 
             if (count == 1 && sysresCount == 1)
             {
-                Log("M262 sysdev clean, no duplicates");
+                Log($"{sysdevStem} sysdev clean, no duplicates");
                 return;
             }
 
             if (count <= 1)
             {
-                Log($"M262 sysdev has {count} resource(s), nothing to dedupe");
+                Log($"{sysdevStem} sysdev has {count} resource(s), nothing to dedupe");
                 return;
             }
 
@@ -262,6 +266,7 @@ namespace CodeGen.Artefacts
 
             Log($"removed {removed} duplicate Resource entries, kept {firstResourceId}");
             Log($"kept resource {firstResourceId}");
+            }
         }
 
         private static void CleanFile(string path, string netTag, CleanupReport report,
@@ -289,7 +294,7 @@ namespace CodeGen.Artefacts
 
                 // Swept because this run re-emits it; anything else on the canvas is left alone.
                 bool isUniversal = manifest.EmittedTypes.Contains(fbType) ||
-                    (fbType == "plcStart" && fbNs == "SE.AppBase");
+                    (fbType == "plcStart" && fbNs == Artefacts.EaeAbi.AppBaseNamespace);
 
                 if (isUniversal)
                 {
