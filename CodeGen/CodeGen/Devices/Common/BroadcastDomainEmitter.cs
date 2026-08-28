@@ -72,7 +72,6 @@ namespace CodeGen.Devices.Core
             var topologyDir = Path.Combine(eaeRoot, "Topology");
             if (!Directory.Exists(topologyDir)) return result;
 
-            const string NullDomain = "00000000-0000-0000-0000-000000000000";
             var uuidRx = new Regex("\"domain\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"");
             var defRx  = new Regex("\"uuid\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"");
 
@@ -84,7 +83,7 @@ namespace CodeGen.Devices.Core
                 foreach (Match m in uuidRx.Matches(text))
                 {
                     var uuid = m.Groups[1].Value;
-                    if (!string.Equals(uuid, NullDomain, StringComparison.OrdinalIgnoreCase))
+                    if (!string.Equals(uuid, Artefacts.EaeAbi.NoBroadcastDomain, StringComparison.OrdinalIgnoreCase))
                         referenced.Add(uuid);
                 }
             }
