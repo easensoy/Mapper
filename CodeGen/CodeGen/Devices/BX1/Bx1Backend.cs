@@ -17,12 +17,12 @@ namespace CodeGen.Devices.BX1
 
         public override void EmitDevice(GenerationContext ctx, DeviceScope scope, Action<string> log) =>
             Stage("device emit", log,
-                () => M580.M580Backend.Report(Station2DeviceEmitter.EmitBx1(ctx.Cfg, scope), log));
+                () => M580.M580Backend.Report(Station2DeviceEmitter.EmitBx1(ctx.Cfg, Target, scope), log));
 
         public override void CopyHardwareConfig(GenerationContext ctx, Action<string> log) =>
             Stage("hcf deploy", log, () =>
             {
-                var hcf = BX1HwConfigCopier.Copy(ctx.Cfg);
+                var hcf = BX1HwConfigCopier.Copy(ctx.Cfg, Target);
                 log($"[BX1] hcf deployed; {hcf.FilesCopied} file(s) copied -> {hcf.HcfPath}");
                 foreach (var w in hcf.Warnings) log($"[BX1][Warn] {w}");
             });
@@ -38,7 +38,7 @@ namespace CodeGen.Devices.BX1
             SystemInjector.BindingApplicationReport report, Action<string> log) =>
             Stage("io broker", log, () =>
             {
-                var n = Bx1IoBrokerInjector.InjectBx1IoBroker(ctx.Cfg, syslayPath, report);
+                var n = Bx1IoBrokerInjector.InjectBx1IoBroker(ctx.Cfg, Target, syslayPath, report);
                 log($"[BX1][Broker] BX1_IO injected into {n} artefact(s).");
                 ResourceWireEmitter.ApplyLayoutToSyslay(ctx, syslayPath, report);
             });
