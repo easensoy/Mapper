@@ -49,7 +49,26 @@ namespace CodeGen.Configuration
         public TelemetryTapDeclaration? Telemetry { get; set; }
         public CatProtocolDeclaration? Protocol { get; set; }
         public PhaseHandoffDeclaration? PhaseHandoff { get; set; }
+        public RefreshDeclaration? Refresh { get; set; }
     }
+
+    // HOW A TYPE IS ASKED TO REPORT WHAT IT ALREADY KNOWS.
+    //
+    // A level sensor reports on a CHANGE, so a level that was already true before this PLC started is
+    // announced once and never again - a recipe waiting on it would wait forever. A type that answers
+    // an addressed request by re-sampling and reporting even when unchanged lets the recipe ask first.
+    // A type that declares no refresh is simply not asked, and the wait relies on a real edge.
+    public sealed class RefreshDeclaration
+    {
+        // The command value the request carries. It is this type's own vocabulary, not a stop number.
+        public int Command { get; set; }
+
+        // How the request addresses the instance. The ring claim test is a case-sensitive string
+        // compare, so a type parameterised with the component's own name cannot be asked by ring key.
+        public RefreshAddressing AddressBy { get; set; } = RefreshAddressing.ComponentName;
+    }
+
+    public enum RefreshAddressing { ComponentName, RingKey }
 
     // The process type's cross-controller phase-announcement contract: the ports a producer raises on
     // and the ports plus receiver slot a consumer answers with.
