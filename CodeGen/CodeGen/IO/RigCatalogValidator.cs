@@ -85,10 +85,80 @@ namespace CodeGen.Configuration
                 errors.Add($"dischargeChannels claim '{g.Key}' {g.Count()} times: " +
                            string.Join(", ", g.Select(d => d.Meaning)));
 
+            errors.AddRange(HandoffErrors(c.Handoff));
+
+            // An unverified physical assumption is only useful if it says what goes wrong and how to
+            // settle it. A row with neither is a note, and a note is what this replaced.
+            for (int i = 0; i < c.UnresolvedPhysicalFacts.Count; i++)
+            {
+                var u = c.UnresolvedPhysicalFacts[i];
+                if (string.IsNullOrWhiteSpace(u.Fact))
+                    errors.Add($"unresolvedPhysicalFacts[{i}] states no fact");
+                if (string.IsNullOrWhiteSpace(u.Risk))
+                    errors.Add($"unresolvedPhysicalFacts[{i}] ('{u.Fact}') states no risk; an assumption " +
+                               "whose consequence nobody wrote down is one nobody assessed");
+                if (string.IsNullOrWhiteSpace(u.VerifyBy))
+                    errors.Add($"unresolvedPhysicalFacts[{i}] ('{u.Fact}') says how to verify nothing, " +
+                               "so it would stay unresolved forever");
+            }
+
             if (errors.Count > 0)
                 throw new InvalidOperationException(
                     "smc-rig.yml is invalid:" + Environment.NewLine + "  - " +
                     string.Join(Environment.NewLine + "  - ", errors));
+        }
+
+        // Both lists here decide whether a plant WAITS for something, and both are matched by "the
+        // first row that covers this edge". Two rows of equal specificity that can both match would
+        // make that answer depend on file order, so they are refused rather than resolved by position.
+        private static IEnumerable<string> HandoffErrors(HandoffPolicy h)
+        {
+            for (int i = 0; i < h.PeerEntryPhase.Count; i++)
+            {
+                var r = h.PeerEntryPhase[i];
+                var who = $"peerEntryPhase[{i}] ({Shown(r.Producer)} -> {Shown(r.Consumer)}" +
+                          (r.ProducerState.Length > 0 ? $", state '{r.ProducerState}'" : "") + ")";
+
+                if (r.Meaning == PeerEntryPhaseMeaning.Undeclared)
+                    yield return $"{who} declares no meaning; use readinessAssertion or runtimePhase";
+                if (string.IsNullOrWhiteSpace(r.Because))
+                    yield return $"{who} gives no 'because'. This row decides whether the plant waits " +
+                                 "for a phase its own model names, so the reason is required";
+            }
+
+            for (int i = 0; i < h.PeerEntryPhase.Count; i++)
+                for (int j = i + 1; j < h.PeerEntryPhase.Count; j++)
+                {
+                    var a = h.PeerEntryPhase[i];
+                    var b = h.PeerEntryPhase[j];
+                    if (a.Specificity != b.Specificity) continue;   // most-specific wins, unambiguously
+                    if (Overlap(a.Producer, b.Producer) && Overlap(a.Consumer, b.Consumer) &&
+                        Overlap(a.ProducerState, b.ProducerState))
+                        yield return
+                            $"peerEntryPhase[{i}] and peerEntryPhase[{j}] are equally specific and both " +
+                            $"cover {Shown(a.Producer)} -> {Shown(a.Consumer)}, so which reading applies " +
+                            "would depend on the order they are written in";
+                }
+
+            // The same hazard on the carrier list, which had no overlap check at all: a wildcard row
+            // written above a specific one silently swallowed it, and a carrier decides whether a
+            // material level is allowed to stand in for a producer's phase.
+            for (int i = 0; i < h.Carriers.Count; i++)
+            {
+                if (string.IsNullOrWhiteSpace(h.Carriers[i].Producer))
+                    yield return $"carriers[{i}] names no producer";
+                if (string.IsNullOrWhiteSpace(h.Carriers[i].Carrier))
+                    yield return $"carriers[{i}] names no carrier";
+                if (string.IsNullOrWhiteSpace(h.Carriers[i].Because))
+                    yield return $"carriers[{i}] gives no 'because'; a substitution nobody can explain " +
+                                 "is one nobody checked";
+                for (int j = i + 1; j < h.Carriers.Count; j++)
+                    if (Overlap(h.Carriers[i].Producer, h.Carriers[j].Producer) &&
+                        Overlap(h.Carriers[i].ProducerState, h.Carriers[j].ProducerState))
+                        yield return $"carriers[{i}] and carriers[{j}] both cover " +
+                                     $"{Shown(h.Carriers[i].Producer)}/{Shown(h.Carriers[i].ProducerState)}, " +
+                                     "so which one substitutes would depend on their order";
+            }
         }
     }
 }
