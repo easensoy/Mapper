@@ -59,17 +59,6 @@ namespace CodeGen.Services
             ".Adapter.export", ".Basic.export",
         };
 
-        // The VueOne hidden runner links against this one-argument signature, so it must stay.
-        public static WipeReport Wipe(string demonstratorRepoRoot)
-        {
-            // This overload is a compatibility entry point the prebuilt VueOne runner links, so it has
-            // no configuration handed to it and reads its own - which makes it a composition root.
-            Configuration.CompilerConfiguration? cfg = null;
-            try { cfg = Configuration.CompilerConfiguration.Load(MapperConfig.Load()); }
-            catch { /* fall back to the default template root */ }
-            return Wipe(cfg!, demonstratorRepoRoot);
-        }
-
         public static WipeReport Wipe(Configuration.CompilerConfiguration cfg, string demonstratorRepoRoot)
         {
             var report = new WipeReport();
