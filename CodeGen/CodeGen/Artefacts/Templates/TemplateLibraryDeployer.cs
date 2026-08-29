@@ -25,7 +25,6 @@ namespace CodeGen.Services
     {
         // The EAE library ships MQTT_PUBLISH under a hash-suffixed variant name; stated once so the two
         // emitters below cannot disagree about which one they instantiate.
-        const string MqttPublishVariant = "MQTT_PUBLISH_115480E69E664F878";
 
         public static DeployResult DeployUniversalArchitecture(GenerationContext ctx)
         {
@@ -85,32 +84,39 @@ namespace CodeGen.Services
             foreach (var name in ctx.Manifest.DeployedLast(ArtefactKind.Cat))
                 DeployArtifact(libPath, "CAT", name, eaeProjectDir, result, isBasic: false, isCat: true);
 
-            DeployArtifact(libPath, "Basic", "changeEventM262_2", eaeProjectDir, result, isBasic: true);
+            // Each of these is deployed by THIS stage rather than the generic pass, because a patch
+            // that gives it its shape follows immediately. The manifest still says what each one is.
+            var changeEvent = ctx.Manifest.ForInfraRole("couplerChangeEvent").Name;
+            var safeStartGate = ctx.Manifest.ForInfraRole("coverSafeStartGate").Name;
+            var eipBroker = ctx.Manifest.ForInfraRole("etherNetIpBroker").Name;
+
+            DeployArtifact(libPath, "Basic", changeEvent, eaeProjectDir, result, isBasic: true);
             // Force-re-extract so a corrected safe-start type reaches an already-generated tree.
-            var fsFbt = Path.Combine(eaeProjectDir, "IEC61499", "Bx1CoverFailsafe.fbt");
+            var fsFbt = Path.Combine(eaeProjectDir, "IEC61499", safeStartGate + ".fbt");
             if (File.Exists(fsFbt)) { try { File.Delete(fsFbt); } catch { /* locked -> keep existing */ } }
-            DeployArtifact(libPath, "Basic", "Bx1CoverFailsafe", eaeProjectDir, result, isBasic: true);
-            DeployArtifact(libPath, "Composite", "PLC_RW_BX1", eaeProjectDir, result, isBasic: false);
-            var brokerFbt = Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_BX1.fbt");
+            DeployArtifact(libPath, "Basic", safeStartGate, eaeProjectDir, result, isBasic: true);
+            DeployArtifact(libPath, "Composite", eipBroker, eaeProjectDir, result, isBasic: false);
+            var brokerFbt = Path.Combine(eaeProjectDir, "IEC61499", eipBroker + ".fbt");
             if (CodeGen.Devices.BX1.Bx1IoBrokerInjector.EnsureInitWordDecodeInComposite(brokerFbt))
-                result.PatchesApplied.Add("PLC_RW_BX1: decode the EtherNet/IP input word at INIT so the cover "
+                result.PatchesApplied.Add($"{eipBroker}: decode the EtherNet/IP input word at INIT so the cover "
                     + "change detector sees the real bits at power-on, not one scan later.");
             CodeGen.Devices.BX1.Bx1IoBrokerInjector.EmbedCoverBridgeInComposite(cfg, brokerFbt);
             // Forces the declared safe-start actuator HOME on start only; EAE Clean/STOP still needs the
             // TM3BC output fallback the scanner validator prints from the same resolved plan.
             var safeStart = CodeGen.Devices.BX1.Bx1SafeStart.Resolve(cfg);
             if (CodeGen.Devices.BX1.Bx1IoBrokerInjector.InjectCoverFailsafeIntoBrokerType(cfg, eaeProjectDir))
-                result.Warnings.Add($"[Deploy][BX1] {safeStart.Component} safe-start gate (Bx1CoverFailsafe) " +
-                    $"inserted into PLC_RW_BX1 — {safeStart.Component} forced HOME on every start.");
+                result.Warnings.Add($"[Deploy][BX1] {safeStart.Component} safe-start gate ({safeStartGate}) " +
+                    $"inserted into {eipBroker} — {safeStart.Component} forced HOME on every start.");
 
             // Without the broker type EAE cannot instantiate RevPI_IO; pure M262 mode never deploys it.
             if (ctx.Profile.HasAssignments)
             {
-                DeployArtifact(libPath, "Composite", "PLC_RW_REVPI", eaeProjectDir, result, isBasic: false);
-                // Internalise the Modbus symlink bridge so the RevPi sysres instantiates only RevPI_IO.
+                var modbusBroker = ctx.Manifest.ForInfraRole("modbusBroker").Name;
+                DeployArtifact(libPath, "Composite", modbusBroker, eaeProjectDir, result, isBasic: false);
+                // Internalise the Modbus symlink bridge so the resource instantiates only the broker.
                 CodeGen.Devices.RevPi.RevPiIoBrokerInjector.EmbedBridgeInComposite(
                     cfg, ctx.Profile.Assignments.Values.First(),
-                    Path.Combine(eaeProjectDir, "IEC61499", "PLC_RW_REVPI.fbt"));
+                    Path.Combine(eaeProjectDir, "IEC61499", modbusBroker + ".fbt"));
 
             }
 
@@ -318,16 +324,16 @@ namespace CodeGen.Services
                     new System.Xml.Linq.XAttribute("Type", "MqttStateFormatter"),
                     new System.Xml.Linq.XAttribute("x", "8000"),
                     new System.Xml.Linq.XAttribute("y", publisherY.ToString()),
-                    new System.Xml.Linq.XAttribute("Namespace", Configuration.GenerationConfig.Namespace));
+                    new System.Xml.Linq.XAttribute("Namespace", cfg.Generation.ProjectNamespace));
 
                 // The hash names a generic variant, and its numbered channel ports exist only once CNTX:=1 is set.
                 var pubFb = new System.Xml.Linq.XElement(ns + "FB",
                     new System.Xml.Linq.XAttribute("ID", pubId),
                     new System.Xml.Linq.XAttribute("Name", "MqttPub"),
-                    new System.Xml.Linq.XAttribute("Type", MqttPublishVariant),
+                    new System.Xml.Linq.XAttribute("Type", cfg.Manifest.ForInfraRole("mqttPublish").Name),
                     new System.Xml.Linq.XAttribute("x", "8600"),
                     new System.Xml.Linq.XAttribute("y", publisherY.ToString()),
-                    new System.Xml.Linq.XAttribute("Namespace", Configuration.GenerationConfig.Namespace));
+                    new System.Xml.Linq.XAttribute("Namespace", cfg.Generation.ProjectNamespace));
                 pubFb.Add(new System.Xml.Linq.XElement(ns + "Attribute",
                     new System.Xml.Linq.XAttribute("Name", "Configuration.GenericFBType.InterfaceParams"),
                     new System.Xml.Linq.XAttribute("Value", "Runtime.NetConnectivity#CNTX:=1")));
