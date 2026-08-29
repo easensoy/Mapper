@@ -346,7 +346,7 @@ namespace MapperTests
         [Fact]
         public void More_interlocks_than_the_declared_array_grow_it_rather_than_losing_rows()
         {
-            int floor = InterlockConfig.Current.RuleArraySize;
+            int floor = TestConfig.Cfg.Interlocks.RuleArraySize;
             var plant = new List<VueOneComponent>();
             var line = Process("C-line", "Kiln_Line", 2);
             var guarded = Actuator("C-g", "Charge_Ram");
