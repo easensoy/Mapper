@@ -12,9 +12,6 @@ namespace CodeGen.Translation.Interlocks
     // this asks the protocol rather than carrying a constant of its own.
     internal static class ActuatorStateEncoding
     {
-        // The stop every CAT settles to at rest, in the shared stop vocabulary.
-        public const int Home = 0;
-
         public static int Settled(VueOneComponent? source, int stateNumber,
             IReadOnlyDictionary<string, string> catTypes, Mapping.TemplateIndex manifest)
         {
