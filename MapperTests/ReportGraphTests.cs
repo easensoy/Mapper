@@ -83,11 +83,11 @@ namespace MapperTests
             var feed = Process("C-feed", FeedProcess);
             var assembly = Process("C-asm", AssemblyProcess);
             var driven = Actuator("C-act", FeedActuator, "C-asm", "C-asm-s0");
-            var twin = TwinModel.Build(new[] { feed, assembly, driven });
+            var twin = TwinModel.Build(new[] { feed, assembly, driven }, TestConfig.Cfg.Twin);
 
             var ex = Assert.Throws<InvalidOperationException>(() => ReportGraph.Build(
                 twin, Allocation(twin),
-                RigCatalog.Current.CrossRingSegment, Array.Empty<string>(), Graphs(twin), TestConfig.Cfg.Targets));
+                RigCatalog.Current.CrossRingSegment, Graphs(twin), TestConfig.Cfg.Targets));
 
             Assert.Contains("[Transport]", ex.Message, StringComparison.Ordinal);
             Assert.Contains(FeedActuator, ex.Message, StringComparison.Ordinal);
@@ -110,10 +110,10 @@ namespace MapperTests
             {
                 new VueOneCondition { ComponentID = "C-act", ID = "C-act-work", Name = "blocked" },
             };
-            var twin = TwinModel.Build(new[] { feed, assembly, here, there });
+            var twin = TwinModel.Build(new[] { feed, assembly, here, there }, TestConfig.Cfg.Twin);
 
             var g = ReportGraph.Build(twin, Allocation(twin),
-                RigCatalog.Current.CrossRingSegment, Array.Empty<string>(), Graphs(twin), TestConfig.Cfg.Targets);
+                RigCatalog.Current.CrossRingSegment, Graphs(twin), TestConfig.Cfg.Targets);
 
             Assert.True(g.RingsMerged);
             Assert.True(g.SameDomain(FeedActuator, AssemblyActuator));
@@ -126,10 +126,10 @@ namespace MapperTests
             // rig declares -- presence is not a reason to wire a cross-controller tail.
             var feed = Process("C-feed", FeedProcess);
             var driven = Actuator("C-act", FeedActuator, "C-feed", "C-feed-s0");
-            var twin = TwinModel.Build(new[] { feed, driven });
+            var twin = TwinModel.Build(new[] { feed, driven }, TestConfig.Cfg.Twin);
 
             var g = ReportGraph.Build(twin, Allocation(twin),
-                RigCatalog.Current.CrossRingSegment, Array.Empty<string>(), Graphs(twin), TestConfig.Cfg.Targets);
+                RigCatalog.Current.CrossRingSegment, Graphs(twin), TestConfig.Cfg.Targets);
 
             Assert.Empty(g.DischargeSegment);
         }
