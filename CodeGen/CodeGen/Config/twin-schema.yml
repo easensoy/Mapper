@@ -1,0 +1,25 @@
+# How this compiler READS a VueOne Control.xml.
+#
+# Not plant data. Every other file in this folder declares something about the SMC rig; this one
+# declares the source SCHEMA - the vocabulary a VueOne twin is written in - so a twin exported by a
+# different VueOne configuration, or carrying a role this rig does not have, can be read without a
+# C# change.
+
+# The <Type> token on a <Component>, mapped to what the compiler does with it.
+#
+#   actuator  driven: commanded over the report ring, settles through a CAT protocol
+#   sensor    observed only: publishes a state, is never commanded
+#   process   carries a recipe: commands actuators and waits on their reports
+#   excluded  not a control component: counted while reading, then dropped before a plan exists
+#
+# A token that is NOT listed here STOPS THE RUN, naming the token and the component that carries it.
+# It used to default to "actuator", so a typo, a new VueOne role or a token from a foreign twin all
+# became something the planner would try to command - and the first sign of it was a plant that moved.
+componentKinds:
+  Actuator:   actuator
+  # VueOne types a gripper and the UR3e task arm as Robot. Both are commanded exactly like an
+  # actuator; WHICH CAT renders one is a generation decision (templates.yml), not a model fact.
+  Robot:      actuator
+  Sensor:     sensor
+  Process:    process
+  NonControl: excluded
