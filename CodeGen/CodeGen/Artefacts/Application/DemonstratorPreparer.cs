@@ -60,7 +60,7 @@ namespace CodeGen.Artefacts
             try { if (!Directory.EnumerateFiles(sysGuidDir, "*.sysdev").Any()) return; }
             catch { return; }
 
-            System.Xml.Linq.XNamespace ns = CodeGen.Devices.Core.Station2DeviceEmitter.LibElNs;
+            System.Xml.Linq.XNamespace ns = CodeGen.Devices.Core.EaeDeviceWriter.LibElNs;
             bool IsBridge(string? n) =>
                 n != null && (n.StartsWith("MqttFmt_", StringComparison.Ordinal)
                            || n.StartsWith("MqttPub_", StringComparison.Ordinal));
@@ -274,7 +274,7 @@ namespace CodeGen.Artefacts
         {
             report.DeviceCleanupLog.Add($"[Clean] file={path} root=<{netTag}>");
 
-            XNamespace ns = CodeGen.Devices.Core.Station2DeviceEmitter.LibElNs;
+            XNamespace ns = CodeGen.Devices.Core.EaeDeviceWriter.LibElNs;
             var doc = XDocument.Load(path);
             var net = doc.Root?.Element(ns + netTag);
             if (net == null)
