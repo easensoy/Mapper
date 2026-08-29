@@ -17,12 +17,12 @@ namespace CodeGen.Devices.BX1
             CodeGen.Translation.PlcAssignment target)
         {
             var copied = HwConfigVerbatimCopier.CopyFor(cfg, target,
-                Station2DeviceEmitter.ResolveBx1HcfPath(cfg));
+                Bx1DeviceRenderer.ResolveBx1HcfPath(cfg));
             // Must run AFTER HwConfiguration/ is rebuilt: an in-EmitAll deploy no-ops here, leaving an
             // EMPTY EIPSCANNER2.xml so the cover I/O never reaches the coupler.
-            Station2DeviceEmitter.DeployBx1ScannerModelFinalPass(cfg, target);
+            Bx1DeviceRenderer.DeployBx1ScannerModelFinalPass(cfg, target);
             // Abort the Generate if the scanner model did not land (empty scanner = dead covers).
-            Station2DeviceEmitter.ValidateBx1ScannerModelOrThrow(cfg, target);
+            Bx1DeviceRenderer.ValidateBx1ScannerModelOrThrow(cfg, target);
             return copied;
         }
     }
