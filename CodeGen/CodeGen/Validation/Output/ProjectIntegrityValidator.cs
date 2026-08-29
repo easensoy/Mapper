@@ -41,7 +41,7 @@ namespace CodeGen.Validation.Output
 
             var findings = new List<Finding>();
             int registrations = CheckRegistrations(eae!, findings);
-            int types = CheckReferencedTypes(eae!, findings);
+            int types = CheckReferencedTypes(eae!, findings, cfg.Generation.ProjectNamespace);
 
             if (findings.Count > 0)
                 throw new InvalidOperationException(
@@ -90,7 +90,7 @@ namespace CodeGen.Validation.Output
         }
 
         // Every FB Type an emitted resource or canvas instantiates must have a deployed .fbt.
-        static int CheckReferencedTypes(string eae, List<Finding> findings)
+        static int CheckReferencedTypes(string eae, List<Finding> findings, string projectNamespace)
         {
             var iec = Path.Combine(eae, "IEC61499");
             if (!Directory.Exists(iec)) return 0;
@@ -121,7 +121,7 @@ namespace CodeGen.Validation.Output
 
                     // A generic library FB (E_DELAY, SYMLINK*, MQTT_*) is resolved by EAE from a
                     // referenced library, not deployed into the project, so its absence proves nothing.
-                    if (IsLibraryType(fb, type!)) continue;
+                    if (IsLibraryType(fb, projectNamespace)) continue;
 
                     referenced.Add(type!);
                     if (!deployed.Contains(type!))
@@ -135,11 +135,11 @@ namespace CodeGen.Validation.Output
 
         // A type EAE supplies rather than the generator: it carries a library namespace, or it is one of
         // the generic shapes EAE specialises at compile time from an InterfaceParams attribute.
-        static bool IsLibraryType(XElement fb, string type)
+        static bool IsLibraryType(XElement fb, string projectNamespace)
         {
             var ns = (string?)fb.Attribute("Namespace") ?? string.Empty;
             if (!string.IsNullOrWhiteSpace(ns) &&
-                !ns.Equals(Configuration.GenerationConfig.Namespace, StringComparison.Ordinal))
+                !ns.Equals(projectNamespace, StringComparison.Ordinal))
                 return true;
 
             return fb.Elements().Any(e => e.Name.LocalName == "Attribute" &&
