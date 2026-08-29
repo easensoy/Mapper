@@ -30,15 +30,17 @@ namespace CodeGen.Devices.Core
 
         // A SYMLINKMULTIVAR bridge FB (QI=TRUE + one NAME<i> per symlink target). `symlinkNames[i]` is the
         // absolute symlink each VALUE binds to; unused VALUEs (arity > names) get an inert spare name.
-        internal static XElement BuildFb(string ns, int id, int uid, string name, string type, int arity,
-            IReadOnlyList<string> symlinkNames, int x, int y)
+        // `ns` is the XML element namespace the document uses; `projectNamespace` is the EAE project the
+        // FB is emitted into. Two different things, and the second is the run's, not the process's.
+        internal static XElement BuildFb(string ns, string projectNamespace, int id, int uid, string name,
+            string type, int arity, IReadOnlyList<string> symlinkNames, int x, int y)
         {
             XName N(string n) => XName.Get(n, ns);
             var fb = new XElement(N("FB"),
                 new XAttribute("ID", id), new XAttribute("UID", uid),
                 new XAttribute("Name", name), new XAttribute("Type", type),
                 new XAttribute("x", x.ToString()), new XAttribute("y", y.ToString()),
-                new XAttribute("Namespace", Configuration.GenerationConfig.Namespace),
+                new XAttribute("Namespace", projectNamespace),
                 new XElement(N("Attribute"),
                     new XAttribute("Name", "Configuration.GenericFBType.InterfaceParams"),
                     new XAttribute("Value", Iface(arity))),
