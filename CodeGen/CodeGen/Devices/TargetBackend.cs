@@ -85,7 +85,16 @@ namespace CodeGen.Devices
     // every backend, so a backend's file shows only what that target actually does.
     public abstract class TargetBackend : ITargetBackend
     {
-        public abstract PlcAssignment Target { get; }
+        // THE ROW THAT DECLARED THIS TARGET, resolved once by the factory that composed the backend.
+        // Each backend used to declare an identical Target property and a one-line constructor, and
+        // then ask the snapshot for its own descriptor again per stage - the same question, five times,
+        // with five chances to ask it of a different snapshot.
+        protected Mapping.TargetDescriptor Descriptor { get; }
+
+        protected TargetBackend(Mapping.TargetDescriptor descriptor) =>
+            Descriptor = descriptor ?? throw new ArgumentNullException(nameof(descriptor));
+
+        public PlcAssignment Target => Descriptor.Plc;
 
         // Most targets serve whatever the roster puts on them; only one with its own IO contract lists.
         public virtual System.Collections.Generic.IReadOnlySet<string> ServableComponents(
