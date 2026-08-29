@@ -156,7 +156,7 @@ namespace MapperUI
 
             // The plan already resolved the twin; a second TwinModel over the same components would be
             // a second answer to every reference this table renders.
-            var twin = plan?.Twin ?? TwinModel.Build(components);
+            var twin = plan?.Twin ?? TwinModel.Build(components, config.Twin);
 
             foreach (var process in twin.Processes.Select(p => p.Source))
             {
