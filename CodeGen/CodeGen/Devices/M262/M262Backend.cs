@@ -10,11 +10,9 @@ namespace CodeGen.Devices.M262
     // physical channels.
     public sealed class M262Backend : TargetBackend
     {
-        // The target this instance emits, handed in by the composition root from the row that
-        // declared it. A second controller of this kind is another row, not another class.
-        public override PlcAssignment Target { get; }
-
-        public M262Backend(PlcAssignment target) => Target = target;
+        // The row this instance emits, handed in by the composition root. A second controller of
+        // this kind is another row, not another class.
+        public M262Backend(Mapping.TargetDescriptor descriptor) : base(descriptor) { }
 
         // An existing device is PRESERVED rather than re-created: re-emitting the sysdev would break the
         // trust binding EAE holds against it, and the application layer is mirrored either way.
@@ -71,7 +69,7 @@ namespace CodeGen.Devices.M262
         // back to the IO folder, so a target that declares a name the index does not carry still deploys.
         string? AuthoredHcf(GenerationContext ctx) =>
             ctx.Cfg.Paths.HcfTemplatesByFileName.TryGetValue(
-                ctx.Targets.Of(Target).HcfTemplate ?? string.Empty, out var authored) ? authored : null;
+                Descriptor.HcfTemplate ?? string.Empty, out var authored) ? authored : null;
 
         // Without these wires EAE deploys the resource but nothing inits.
         public override void WireResource(GenerationContext ctx,
