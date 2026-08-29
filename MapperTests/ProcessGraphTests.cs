@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Domain.Twin;
@@ -118,7 +118,12 @@ namespace MapperTests
             Assert.Contains("Charge", ex.Message);
             Assert.Contains("Hot_Draw", ex.Message);
             Assert.Contains("Cold_Draw", ex.Message);
-            Assert.Contains("one NextStep per row", ex.Message);
+            // The refusal has to say WHY the compiler will not choose, and what the modeller can do
+            // instead - a diagnostic that only says "no" sends them to read the runtime.
+            Assert.Contains("LANGUAGE LIMITATION", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("Recipe[x].NextStep", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("loop", ex.Message, StringComparison.Ordinal);
+            Assert.Contains("two processes", ex.Message, StringComparison.Ordinal);
         }
 
         [Fact]
