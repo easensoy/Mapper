@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Models;
@@ -132,8 +132,15 @@ namespace CodeGen.Domain.Twin
                         $"has {outgoing.Count} outgoing transitions (" +
                         string.Join(", ", outgoing.Select(t =>
                             $"'{t.TransitionID}' -> '{Dest(byId, t)}'")) +
-                        "). The recipe engine carries one NextStep per row and has no branch row, so a " +
-                        "choice of destinations cannot be lowered without discarding one of them");
+                        "). A CONDITIONAL BRANCH IS A LANGUAGE LIMITATION OF THE DEPLOYED RECIPE " +
+                        "RUNTIME, not of this model. ProcessRuntime_Generic_v1 assigns a destination " +
+                        "in exactly two places and both read Recipe[x].NextStep, a single value; and " +
+                        "check_wait records only THAT one alternative of a WAIT held (a BOOL), never " +
+                        "WHICH, so by the time it jumps the winner's identity is gone. Lowering this " +
+                        "would have to discard a destination the twin states. " +
+                        "Model it as a loop instead - the engine expresses an arbitrary back-edge - or " +
+                        "split the choice across two processes. Supporting it needs a versioned engine " +
+                        "carrying a per-alternative destination; see Docs/INVARIANTS.md I-19.");
 
                 var only = outgoing.FirstOrDefault();
                 if (only != null)
