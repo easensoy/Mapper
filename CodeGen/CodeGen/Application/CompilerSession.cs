@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using CodeGen.Configuration;
 using CodeGen.Devices;
-using CodeGen.Mapping;
 using CodeGen.Translation;
 
 namespace CodeGen.Application
@@ -29,37 +28,15 @@ namespace CodeGen.Application
             Backends = backends;
         }
 
-        /// A target is IMPLEMENTED because a backend claims it and DECLARED because device.yml has a
-        /// row for it. The two must agree exactly: a declared target with no backend is a device the
-        /// deployment expects and the run silently skips, and a backend with no row has no resource
-        /// name to emit under. Checked here, once, before anything is planned.
-        public static CompilerSession Begin(CompilerConfiguration cfg, IReadOnlyList<ITargetBackend> backends)
-        {
-            if (cfg is null) throw new ArgumentNullException(nameof(cfg));
-            if (backends is null || backends.Count == 0)
-                throw new ArgumentException(
-                    "no target backends were registered, so no device could be emitted", nameof(backends));
-
-            var errors = new List<string>();
-            foreach (var g in backends.GroupBy(b => b.Target).Where(g => g.Count() > 1))
-                errors.Add($"two backends both claim target '{g.Key}', so which one emits it is undecided");
-
-            var implemented = backends.Select(b => b.Target).ToList();
-            var declared = cfg.Devices.Targets;
-            foreach (var d in declared)
-                if (!implemented.Contains(d.Plc))
-                    errors.Add($"device.yml declares target '{d.Plc}', which no backend implements");
-            foreach (var plc in implemented)
-                if (declared.All(d => d.Plc != plc))
-                    errors.Add($"backend '{plc}' has no device.yml targets entry, so it has no resource name");
-
-            if (errors.Count > 0)
-                throw new InvalidOperationException(
-                    "Target registration is inconsistent:" + Environment.NewLine +
-                    "  - " + string.Join(Environment.NewLine + "  - ", errors));
-
-            return new CompilerSession(cfg, backends);
-        }
+        /// A run composes its OWN backends, from its own declarations.
+        ///
+        /// Backend-vs-declaration agreement used to be checked here as well as at the factory, which
+        /// meant two owners of one question - and every check here was already unreachable, because a
+        /// list built by walking backendEmitOrder over the declared targets cannot contain a duplicate,
+        /// an unimplemented target or a backend with no row. Taking only the snapshot is what makes a
+        /// mismatched pairing unrepresentable rather than merely rejected twice.
+        public static CompilerSession Begin(CompilerConfiguration cfg) =>
+            new(cfg ?? throw new ArgumentNullException(nameof(cfg)), GenerateProject.Backends(cfg));
 
         /// The same session against a different configuration — used when the run is redirected into a
         /// staging tree. A NEW session, so nothing that already holds one sees the change.
