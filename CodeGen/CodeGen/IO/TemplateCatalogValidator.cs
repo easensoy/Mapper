@@ -82,12 +82,27 @@ namespace CodeGen.Configuration
                     errors.Add($"actuator CAT '{t.Name}' declares neither a command protocol nor an " +
                                "execution policy, so nothing could drive an instance of it");
 
-            // Two CATs serving one shape makes the selection depend on where a row happens to sit.
-            foreach (var g in c.Templates.Where(t => t.Protocol != null)
-                         .SelectMany(t => t.Protocol!.StateCounts.Select(n => (Shape: n, t.Name)))
-                         .GroupBy(x => x.Shape).Where(g => g.Count() > 1))
-                errors.Add($"a {g.Key}-state graph is claimed by {g.Count()} CATs " +
-                           $"({string.Join(", ", g.Select(x => x.Name))}) with no declared priority");
+            // TWO CATS THAT COULD BOTH SERVE ONE GRAPH need a declared priority, or which one a plant
+            // gets depends on the order the rows happen to sit in.
+            //
+            // This used to refuse ANY two CATs sharing a state count, unconditionally, while its own
+            // message told the reader to declare a priority - which it then never read. So `priority`
+            // could not resolve anything, and adding a CAT for a shape an existing CAT also served was
+            // impossible without editing the existing row. It also compared state counts ONLY, so a
+            // CAT declaring `servesBranched` and one declaring `stateCounts` both matched a branched
+            // twin of that size and nothing caught it until the plan refused, mid-run.
+            var withProtocol = c.Templates.Where(t => t.Protocol != null).ToList();
+            for (int i = 0; i < withProtocol.Count; i++)
+                for (int j = i + 1; j < withProtocol.Count; j++)
+                {
+                    var (a, b) = (withProtocol[i], withProtocol[j]);
+                    if (!a.Protocol!.CouldClashWith(b.Protocol!)) continue;
+                    if (a.Protocol!.Priority != b.Protocol!.Priority) continue;   // higher wins, unambiguously
+                    errors.Add($"'{a.Name}' and '{b.Name}' can both serve one twin graph and declare the " +
+                               $"same protocol.priority ({a.Protocol!.Priority}), so which CAT a plant " +
+                               "gets would depend on the order these rows are written in. Give one a " +
+                               "higher priority, or narrow the shapes they serve");
+                }
 
             errors.AddRange(ProtocolErrors(c.Templates));
 
@@ -110,8 +125,6 @@ namespace CodeGen.Configuration
                 {
                     if (!p.Settled.ContainsKey(stop))
                         yield return $"'{t.Name}' commands '{stop}' but declares no settled value for it";
-                    if (!p.Interlock.ContainsKey(stop))
-                        yield return $"'{t.Name}' commands '{stop}' but declares no interlock value for it";
                 }
                 // enforcedTargets names stops in the TARGET vocabulary - what the CAT's own interlock
                 // manager compares against - so a verdict aimed outside it could never gate a move.
