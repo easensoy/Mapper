@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
+using System.Linq;
 using CodeGen.Configuration;
 using CodeGen.Services;
 
@@ -97,9 +98,19 @@ namespace CodeGen.Devices.Core
                 if (m.Success) defined.Add(m.Groups[1].Value);
             }
 
-            // Undefined domains are the ones the dPACs reference, so they take the M262 rig
-            // subnet, not DefaultNetwork.
-            var dev = cfg.Devices.M262;
+            // A domain the devices reference but nothing declares is a DEVICE network, so it takes a
+            // declared target's subnet rather than DefaultNetwork - which is the engineering-PC side
+            // and would put the controllers on the wrong network.
+            //
+            // WHICH target's is read from backendEmitOrder, i.e. the first controller this run drives.
+            // It used to be `cfg.Devices.M262` unconditionally, so a deployment that declares no M262
+            // took the addresses of a target it does not have.
+            var firstDriven = cfg.Devices.BackendEmitOrder.FirstOrDefault();
+            if (firstDriven == default)
+                throw new InvalidOperationException(
+                    "[Topology] a broadcast domain is referenced but undeclared, and device.yml names " +
+                    "no target in backendEmitOrder to take a subnet from.");
+            var dev = cfg.Devices.NetworkOf(firstDriven.ToString());
             int n = 1;
             foreach (var uuid in referenced)
             {
