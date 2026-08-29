@@ -7,7 +7,7 @@ namespace CodeGen.Translation
 {
     public class SyslayBuilder
     {
-        private static readonly XNamespace Ns = CodeGen.Devices.Core.Station2DeviceEmitter.LibElNs;
+        private static readonly XNamespace Ns = CodeGen.Devices.Core.EaeDeviceWriter.LibElNs;
         private static readonly XNamespace Xsi = "http://www.w3.org/2001/XMLSchema-instance";
 
         private readonly string _layerId;
@@ -16,11 +16,13 @@ namespace CodeGen.Translation
         private readonly XElement _dataConnections;
         private readonly XElement _adapterConnections;
         private readonly XElement _layer;
+        private readonly string _layerName;
         private string? _topComment;
 
-        public SyslayBuilder(string layerId)
+        public SyslayBuilder(string layerId, string layerName)
         {
             _layerId = layerId ?? throw new ArgumentNullException(nameof(layerId));
+            _layerName = layerName ?? throw new ArgumentNullException(nameof(layerName));
 
             _eventConnections = new XElement(Ns + "EventConnections");
             _dataConnections = new XElement(Ns + "DataConnections");
@@ -30,7 +32,7 @@ namespace CodeGen.Translation
 
             _layer = new XElement(Ns + "Layer",
                 new XAttribute("ID", _layerId),
-                new XAttribute("Name", Configuration.GenerationConfig.Layer),
+                new XAttribute("Name", _layerName),
                 new XAttribute("Comment", string.Empty),
                 new XAttribute("IsDefault", "true"),
                 new XAttribute(XNamespace.Xmlns + "xsi", Xsi.NamespaceName),
