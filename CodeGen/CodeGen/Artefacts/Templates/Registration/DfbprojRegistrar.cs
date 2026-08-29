@@ -86,33 +86,6 @@ namespace CodeGen.Devices.Core
             return a;
         }
 
-        public static int UnregisterHardwareDeviceCat(string dfbprojPath, string typeName)
-        {
-            if (!File.Exists(dfbprojPath)) return 0;
-            var xml = XDocument.Load(dfbprojPath, LoadOptions.PreserveWhitespace);
-            var ns = xml.Root!.GetDefaultNamespace();
-            int removed = 0;
-            var prefix = typeName + @"\";
-            foreach (var name in new[] { "Compile", "None", "Folder" })
-            {
-                foreach (var el in xml.Descendants(ns + name).ToList())
-                {
-                    var inc = (string?)el.Attribute("Include");
-                    if (string.IsNullOrEmpty(inc)) continue;
-                    bool match = name == "Folder"
-                        ? string.Equals(inc, typeName, StringComparison.OrdinalIgnoreCase)
-                        : inc.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
-                    if (!match) continue;
-                    var nextWs = el.NextNode as XText;
-                    el.Remove();
-                    if (nextWs != null) nextWs.Remove();
-                    removed++;
-                }
-            }
-            if (removed > 0) Save(xml, dfbprojPath);
-            return removed;
-        }
-
         public static int RegisterBasicFb(string dfbprojPath, string fileName, string type = "Basic")
         {
             var xml = XDocument.Load(dfbprojPath);
