@@ -127,7 +127,7 @@ namespace CodeGen.Devices.Core
                 doc.Save(foldersPath);
             return result;
         }
-    
+
         // The sysdev of every target this run emits, in the DECLARED DRIVE ORDER - which is the order
         // the backends run in, so the registration matches the emission it describes. A target that
         // receives relocated components is emitted only when this run relocated something onto it.
