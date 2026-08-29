@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Control Type="System">
+  <s>
+    <n>AllExcludedPlant</n>
+    <SystemID>SYS-excluded</SystemID>
+    <Component>
+      <n>Frame</n>
+      <ComponentID>C-frame</ComponentID>
+      <Type>NonControl</Type>
+    </Component>
+    <Component>
+      <n>Guard_Rail</n>
+      <ComponentID>C-rail</ComponentID>
+      <Type>NonControl</Type>
+    </Component>
+  </s>
+</Control>
