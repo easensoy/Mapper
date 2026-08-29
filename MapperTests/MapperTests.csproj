@@ -23,6 +23,11 @@
     <None Update="TestData\SMC_Rig_IO_Bindings.xlsx">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <!-- Twins the frontend refusals are asserted against. Checked in rather than written by a test,
+         so what the compiler refuses is reviewable and cannot drift with the test that reads it. -->
+    <None Update="TestData\twins\**\*.xml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>
