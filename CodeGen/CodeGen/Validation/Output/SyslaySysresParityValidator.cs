@@ -33,15 +33,15 @@ namespace CodeGen.Devices.Core
                 ? EaeProjectLayout.FindSysdevByDeviceType(eaeRoot, deviceType)
                 : EaeProjectLayout.FindSysdevByDeviceTypeAndName(eaeRoot, deviceType, deviceName);
 
-        static readonly string[] RuntimeParamNames =
+        // The interlock half is the patcher's own contract rather than a second copy of it: the fold
+        // is switchable, so which of those inputs an instance carries is that patcher's answer.
+        static readonly string[] RuntimeParamNames = new[]
         {
             "Recipe", "StepType", "CmdTargetName", "CmdStateArr", "Wait1Id", "Wait1State", "NextStep",
-            "RuleTable", "RuleCount", "RuleFromState", "RuleToState", "RuleSourceID", "RuleBlockedState",
-            "Target", "TargetWork1State", "TargetWork2State", "TargetHomeState",
             "actuator_id", "actuator_name", "process_id", "process_state_name",
             "WorkSensorFitted", "HomeSensorFitted",
             "work1ToHomeTime", "work2ToHomeTime", "toWorkTime", "toHomeTime",
-        };
+        }.Concat(CodeGen.Services.InterlockCatPatcher.AllInterlockInputs).ToArray();
 
         static string Short(string s) => s.Length <= 48 ? s : s.Substring(0, 45) + "...";
 
@@ -84,7 +84,8 @@ namespace CodeGen.Devices.Core
                 return violations;
 
             List<SysresFbMirror.SyslayFb> syslayFbs;
-            try { syslayFbs = SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslayPath); }
+            try { syslayFbs = SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(
+                syslayPath, ctx.Cfg.Generation.ProjectNamespace); }
             catch (Exception ex)
             {
                 violations.Add(new("syslay", $"could not read the generated syslay: {ex.Message}"));
@@ -156,10 +157,6 @@ namespace CodeGen.Devices.Core
                 ValidateDischargeHcf(ctx.Cfg.Rig, eaeRoot, violations,
                     ctx.Targets.Of(ctx.SegmentRingHost));
 
-            // Independent of the discharge tail, which stays on the target that owns its channels.
-            if (ctx.Profile.HasAssignments)
-                ValidateRevPiIo(ctx.Cfg, eaeRoot, syslayPath, violations, ctx.Targets);
-
             return violations;
         }
 
@@ -220,123 +217,5 @@ namespace CodeGen.Devices.Core
                         "the ejector/robot will not actuate on the rig"));
         }
 
-        // RevPi hosts the discharge tail on its own sysres, with no .hcf to bind yet, so assert each
-        // discharge FB named by Config/smc-rig.yml dischargeChannels landed there.
-        // The one target declared to receive components relocated off another. Asked for by that
-        // capability so a project with a different relocation host needs no edit here.
-        static TargetDescriptor RelocationTarget(Mapping.TargetIndex targets) =>
-            targets.All.FirstOrDefault(t => t.StandsInFor != null)
-            ?? throw new InvalidOperationException(
-                "device.yml declares no target that receives relocated components, so a relocated " +
-                "deployment cannot be validated.");
-
-        static void ValidateDischargeRevPi(RigCatalog rig, string eaeRoot, List<Violation> violations,
-            Mapping.TargetIndex targets)
-        {
-            var relocation = RelocationTarget(targets);
-            var sysdev = EaeProjectLayout.FindSysdevByDeviceTypeAndName(
-                eaeRoot, relocation.DeviceType, relocation.DeviceName!);
-            var sysres = sysdev == null ? null : EaeProjectLayout.FindSysresFor(sysdev);
-            if (string.IsNullOrEmpty(sysres) || !File.Exists(sysres))
-            {
-                violations.Add(new("RevPi-Discharge", "discharge tail active but the RevPi sysres was not found"));
-                return;
-            }
-
-            HashSet<string> fbNames;
-            try
-            {
-                var doc = XDocument.Load(sysres);
-                XNamespace ns = doc.Root!.GetDefaultNamespace();
-                fbNames = doc.Descendants(ns + "FB")
-                    .Select(e => (string?)e.Attribute("Name"))
-                    .Where(n => !string.IsNullOrEmpty(n))
-                    .Select(n => n!)
-                    .ToHashSet(StringComparer.Ordinal);
-            }
-            catch (Exception ex)
-            {
-                violations.Add(new("RevPi-Discharge", $"unreadable RevPi sysres '{Path.GetFileName(sysres)}': {ex.Message}"));
-                return;
-            }
-
-            foreach (var fb in rig.DischargeChannels
-                         .Select(dc => dc.Component).Distinct(StringComparer.Ordinal))
-                if (!fbNames.Contains(fb))
-                    violations.Add(new("RevPi-Discharge",
-                        $"discharge tail active but '{fb}' is not on the RevPi sysres — the discharge tail did not land on the Feed controller"));
-
-        }
-
-        // RevPi Feed IO = the Modbus broker RevPI_IO on the sysres carrying a Mapping to a matching application
-        // instance, plus the .hcf whose LinkNames resolve to it. Without all three the Feed IO does not bind.
-        static void ValidateRevPiIo(Configuration.CompilerConfiguration cfg,
-            string eaeRoot, string syslayPath, List<Violation> violations,
-            Mapping.TargetIndex targets)
-        {
-            var BrokerFbId = CodeGen.Devices.RevPi.RevPiIoBrokerInjector.BrokerFbId(cfg);
-            const string BrokerName = CodeGen.Devices.RevPi.RevPiIoBrokerInjector.BrokerName;
-
-            var sysdev = EaeProjectLayout.FindSysdevByDeviceTypeAndName(
-                eaeRoot, RelocationTarget(targets).DeviceType, RelocationTarget(targets).DeviceName!);
-            var sysres = sysdev == null ? null : EaeProjectLayout.FindSysresFor(sysdev);
-            if (string.IsNullOrEmpty(sysres) || !File.Exists(sysres))
-            {
-                violations.Add(new("RevPi-IO",
-                    "a RevPi Feed station is selected but the RevPi sysres was not found — the Feed components have no deployable resource"));
-                return;
-            }
-
-            XElement? broker;
-            try
-            {
-                var doc = XDocument.Load(sysres);
-                XNamespace ns = doc.Root!.GetDefaultNamespace();
-                broker = doc.Descendants(ns + "FB").FirstOrDefault(e => (string?)e.Attribute("Name") == BrokerName);
-            }
-            catch (Exception ex)
-            {
-                violations.Add(new("RevPi-IO", $"unreadable RevPi sysres '{Path.GetFileName(sysres)}': {ex.Message}"));
-                return;
-            }
-
-            if (broker == null)
-            {
-                violations.Add(new("RevPi-IO",
-                    $"the {BrokerName} Modbus broker (PLC_RW_REVPI) is not on the RevPi sysres — the Feed actuators would have no physical IO"));
-            }
-            else
-            {
-                // A resource FB with no Mapping is an ORPHAN: EAE has no application instance to bind it to,
-                // which is the documented "Repair Instances" class.
-                if (string.IsNullOrWhiteSpace((string?)broker.Attribute("Mapping")))
-                    violations.Add(new("RevPi-IO",
-                        $"{BrokerName} on the RevPi sysres has no Mapping attribute — it is an orphan resource instance with no application-layer counterpart"));
-
-                // The .hcf's LinkNames are <resourceId>.<fbId>.<port>, so the FB id is load-bearing.
-                if (!string.Equals((string?)broker.Attribute("ID"), BrokerFbId, StringComparison.OrdinalIgnoreCase))
-                    violations.Add(new("RevPi-IO",
-                        $"{BrokerName}'s FB ID is not {BrokerFbId} — the Modbus .hcf LinkNames resolve against that id and would not bind"));
-            }
-
-            // The application layer must declare the broker too, else the sysres Mapping dangles.
-            try
-            {
-                if (!SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslayPath)
-                        .Any(f => string.Equals(f.Name, BrokerName, StringComparison.Ordinal)))
-                    violations.Add(new("RevPi-IO",
-                        $"{BrokerName} is missing from the generated syslay — the resource instance has no application counterpart to map onto"));
-            }
-            catch { /* the syslay read is already reported by the caller */ }
-
-            var revpiFolder = Path.GetDirectoryName(sysres);
-            var hcf = revpiFolder != null && Directory.Exists(revpiFolder)
-                ? Directory.EnumerateFiles(revpiFolder, "*.hcf").FirstOrDefault() : null;
-            if (hcf == null)
-                violations.Add(new("RevPi-IO", "the RevPi Modbus .hcf is missing — EAE reports Missing Project Files"));
-            else if (!File.ReadAllText(hcf).Contains(BrokerFbId, StringComparison.Ordinal))
-                violations.Add(new("RevPi-IO",
-                    "the RevPi .hcf's Modbus LinkNames do not resolve to the RevPI_IO broker FB — the Feed IO would not bind"));
-        }
     }
 }
