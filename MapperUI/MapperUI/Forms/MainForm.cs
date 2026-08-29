@@ -484,7 +484,7 @@ namespace MapperUI
             try
             {
                 MapperLogger.Info($"Loading: {path}");
-                _lastReader = new SystemXmlReader();
+                _lastReader = new SystemXmlReader(Declarations().Twin);
                 _loadedComponents = await Task.Run(() => _lastReader.ReadAllComponents(path));
 
                 if (_loadedComponents.Count == 0)
@@ -509,7 +509,6 @@ namespace MapperUI
                     MessageBox.Show(detail, "Mapping Rules", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
 
-                var validator = new ComponentValidator();
                 var cfg = Cfg();
                 int rowIdx = 0;
 
@@ -523,7 +522,7 @@ namespace MapperUI
                         CollectRevPiSelection(), Declarations()));
                 foreach (var comp in _loadedComponents)
                 {
-                    var vr = Validate(comp, validator, Declarations().Manifest);
+                    var vr = Validate(comp, Declarations().Manifest);
                     _validationRows.Add(vr);
 
                     var reg = roster.Get(comp.Name);
@@ -647,23 +646,17 @@ namespace MapperUI
         // The grid REPORTS the compiler's decision; it does not make one. Which shapes a CAT serves is
         // declared in templates.yml and answered by the run's TemplateIndex, so a CAT added there
         // shows up here with no edit - and the row can never name a template the run would not emit.
-        static ComponentValidationRow Validate(VueOneComponent comp, ComponentValidator validator,
+        static ComponentValidationRow Validate(VueOneComponent comp,
             CodeGen.Mapping.TemplateIndex manifest)
         {
             if (ComponentType.IsProcess(comp))
                 return Pass(comp, CatFile(manifest.ProcessType.Name));
 
             if (ComponentType.IsSensor(comp))
-            {
-                var sensorFile = CatFile(manifest.SensorType.Name);
-                var vr = validator.Validate(comp);
-                return vr.IsValid
-                    ? Pass(comp, sensorFile)
-                    : Fail(comp, sensorFile, vr.Summary);
-            }
+                return Pass(comp, CatFile(manifest.SensorType.Name));
 
-            if (!ComponentType.IsActuator(comp) && !ComponentType.Is(comp, ComponentType.Robot))
-                return Fail(comp, NoTemplate, $"Unknown type '{comp.Type}'");
+            // Anything the schema did not classify never reaches here: the reader refuses an
+            // unmapped Type by name, so there is no "unknown type" row left to render.
 
             // The one component -> FB Type decision, asked of its owner. Its refusal message already
             // says which shapes ARE served, so the grid shows that rather than a second rule here.
@@ -686,7 +679,7 @@ namespace MapperUI
             foreach (var c in components)
             {
                 if (ComponentType.IsSensor(c)) { names.Add(manifest.SensorType.Name); continue; }
-                if (!ComponentType.IsActuator(c) && !ComponentType.Is(c, ComponentType.Robot)) continue;
+                if (!ComponentType.IsActuator(c)) continue;
                 try { names.Add(manifest.ResolveActuatorCatType(c)); }
                 catch (InvalidOperationException) { }
             }
@@ -806,16 +799,15 @@ namespace MapperUI
         void UpdateDetectedInfo()
         {
             if (_loadedComponents.Count == 0) return;
-            int a = _loadedComponents.Count(c => c.Type == "Actuator");
-            int s = _loadedComponents.Count(c => c.Type == "Sensor");
-            int p = _loadedComponents.Count(c => c.Type == "Process");
-            int r = _loadedComponents.Count(c => c.Type == "Robot");
+            int a = _loadedComponents.Count(ComponentType.IsActuator);
+            int s = _loadedComponents.Count(ComponentType.IsSensor);
+            int p = _loadedComponents.Count(ComponentType.IsProcess);
 
             lblDetectedType.Text = _loadedComponents.Count == 1 ? _loadedComponents[0].Type : "System";
             lblDetectedName.Text = _loadedComponents.Count == 1 ? _loadedComponents[0].Name : (_lastReader?.SystemName ?? "-");
             lblDetectedStates.Text = _loadedComponents.Count == 1
                 ? $"{_loadedComponents[0].States.Count} states"
-                : $"{a} actuators, {s} sensors, {p} processes, {r} robots";
+                : $"{a} actuators, {s} sensors, {p} processes";
         }
 
         void SetValidationLabel(string text, Color color)
