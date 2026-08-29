@@ -273,7 +273,7 @@ namespace CodeGen.Translation
                     ? (IReadOnlyDictionary<string, string>)EmptyParameters
                     : new Dictionary<string, string> { [template.NameParameter] = Iec61499Literal.FormatString(name) };
                 infra.Add(new InfraInstance(role, name, template,
-                    Configuration.GenerationConfig.Namespace, row.X, row.Y, parameters));
+                    Cfg.Generation.ProjectNamespace, row.X, row.Y, parameters));
             }
 
             var anchor = Station.Sensors.Concat(Station.Actuators)
@@ -385,7 +385,7 @@ namespace CodeGen.Translation
             if (!System.IO.File.Exists(controlXmlPath))
                 throw new System.IO.FileNotFoundException($"Control.xml not found: {controlXmlPath}", controlXmlPath);
 
-            var components = new CodeGen.IO.SystemXmlReader().ReadAllComponents(controlXmlPath);
+            var components = new CodeGen.IO.SystemXmlReader(config.Twin).ReadAllComponents(controlXmlPath);
             return Plan(config, components, profile);
         }
 
@@ -399,7 +399,7 @@ namespace CodeGen.Translation
             if (components == null) throw new ArgumentNullException(nameof(components));
             // Resolve the twin first: a model whose references do not close is rejected here rather than
             // silently losing whatever the dangling reference asked for.
-            return Plan(config, TwinModel.Build(components), profile);
+            return Plan(config, TwinModel.Build(components, config.Twin), profile);
         }
 
         // THE PLAN, from an already-resolved twin. The composition root resolves the model once and
@@ -448,7 +448,7 @@ namespace CodeGen.Translation
                 StringComparer.OrdinalIgnoreCase);
 
             var rings = ReportGraph.Build(
-                twin, allocation, profile.Facts.CarrierSegment, detouredChain, graphs, config.Targets);
+                twin, allocation, profile.Facts.CarrierSegment, graphs, config.Targets);
             bool ringsMerged = rings.RingsMerged;
             var crossRingSegment = rings.DischargeSegment;
             // Every fixed slot the profile declares, from the one stableSlot column.
