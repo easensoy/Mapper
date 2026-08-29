@@ -9,12 +9,14 @@ namespace CodeGen.Services
     // Shared .fbt/.xml load/save primitives for the deploy-time template patchers. They retry on a
     // transient EAE file lock and preserve byte-identical formatting. Consumed via `using static`.
     // WHERE the deployed types are and HOW LONG to keep trying one EAE is holding open - the two
-    // facts every patch needs and neither should read for itself. Carried together so a patcher takes
-    // one parameter, not two, and cannot pair a root with a budget from a different run.
-    internal readonly record struct FbtEditScope(string Root, int Retries, Mapping.TemplateIndex Manifest)
+    // facts every patch needs and none should read for itself. Carried together so a patcher takes
+    // one parameter, not four, and cannot pair a root with a budget or a namespace from a different run.
+    internal readonly record struct FbtEditScope(
+        string Root, int Retries, Mapping.TemplateIndex Manifest, string ProjectNamespace)
     {
         public static FbtEditScope For(string eaeProjectDir, Configuration.CompilerConfiguration cfg) =>
-            new(eaeProjectDir, cfg.Generation.FileWriteRetries, cfg.Manifest);
+            new(eaeProjectDir, cfg.Generation.FileWriteRetries, cfg.Manifest,
+                cfg.Generation.ProjectNamespace);
     }
 
     internal static class FbtXmlEditor
