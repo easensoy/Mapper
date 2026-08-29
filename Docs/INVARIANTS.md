@@ -354,6 +354,44 @@ dropping the other ships a plant that silently ignores half its own model; and
 any new `return` in the guard lowering that does not record an outcome fails the
 coverage proof rather than quietly losing a condition.
 
+### The limitation, stated precisely, and what would lift it
+
+This is a limitation of the deployed RUNTIME, not of the compiler, and it was
+re-verified against the shipped archive
+(`Template Library/Basic/ProcessRuntime_Generic_v1.*.Basic.zip`):
+
+- `CurrentStep` is assigned in exactly TWO places, `check_wait`
+  (`CurrentStep := Recipe[grp].NextStep`) and `AdvanceStep`
+  (`CurrentStep := Recipe[CurrentStep].NextStep`). Both read a single value, and
+  `grp` is pinned to the group head BEFORE any guard is evaluated.
+- `sat` is declared `BOOL`. `check_wait` records only THAT one alternative of a
+  WAIT held, never WHICH — the cursor has walked past the whole group by the time
+  it jumps. So the winning alternative's identity is discarded by construction.
+- No field of `RecipeStep` can carry a second destination: `NextStep` is
+  singular, and `AltCount`/`TermCount` are counts.
+
+**The bounded extension that would support it** — recorded so it is a scoped
+piece of work rather than a rediscovery: a `RecipeStep` field carrying a
+per-alternative destination, an internal var to hold the winning alternative's
+head, and three lines in `check_wait` (capture the head before the term loop;
+`IF ok AND NOT sat THEN sat := TRUE; win := head; END_IF;`; jump to
+`Recipe[win].<that field>`). **No ECC state or transition changes** — the branch
+resolves inside the algorithm, before `WaitSatisfied` is tested.
+
+**Why it is not implemented here.** It needs three new EAE artefacts (a datatype,
+an engine and the composite that wires it) and EAE Buildtime is not installed on
+this machine, so none of them could be compiled — and a `.fbt` EAE rejects fails
+the import of the WHOLE project, including models that do not branch. It must be
+done with EAE in hand, as a versioned type selected only when a process actually
+branches, so linear models keep the engine they run today.
+
+**One question must be answered first**, and only EAE can answer it:
+`Iec61499Literal.FormatRecipeTable` emits a hard-coded 8-member struct literal
+rather than reflecting the `.dt`, so adding a field does not by itself move any
+byte. Whether EAE accepts a struct literal that OMITS a declared member decides
+whether linear recipes stay byte-identical or gain one member per row. No
+artefact in this repository exercises that case.
+
 ---
 
 ## I-20. A cross-process reference the recipe cannot simply wait for is answered by a DECLARATION
