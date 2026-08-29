@@ -19,9 +19,8 @@ namespace MapperTests
         private sealed class Failing : TargetBackend
         {
             private readonly string _stage;
-            public Failing(string stage) => _stage = stage;
+            public Failing(string stage, TargetDescriptor d) : base(d) => _stage = stage;
             public readonly List<string> Log = new();
-            public override PlcAssignment Target => PlcAssignment.Named("M262");
 
             public override void EmitDevice(GenerationContext ctx, DeviceScope scope, Action<string> log) =>
                 Run("device emit", log);
@@ -56,7 +55,7 @@ namespace MapperTests
         [MemberData(nameof(RequiredStages))]
         public void A_failed_required_stage_aborts_and_names_the_target_the_stage_and_the_cause(string stage)
         {
-            var backend = new Failing(stage);
+            var backend = new Failing(stage, TestConfig.Cfg.Targets.All[0]);
             var log = new List<string>();
             void Drive()
             {
@@ -77,7 +76,7 @@ namespace MapperTests
         [Fact]
         public void A_stage_that_succeeds_is_not_turned_into_a_failure()
         {
-            var backend = new Failing("nothing fails");
+            var backend = new Failing("nothing fails", TestConfig.Cfg.Targets.All[0]);
             var log = new List<string>();
             backend.EmitDevice(null!, null!, log.Add);
             backend.CopyHardwareConfig(null!, log.Add);
