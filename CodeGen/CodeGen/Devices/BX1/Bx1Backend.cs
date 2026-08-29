@@ -9,15 +9,13 @@ namespace CodeGen.Devices.BX1
     // The BX1 Soft dPAC: the cover station, and the EtherNet/IP coupler its scanner drives.
     public sealed class Bx1Backend : TargetBackend
     {
-        // The target this instance emits, handed in by the composition root from the row that
-        // declared it. A second controller of this kind is another row, not another class.
-        public override PlcAssignment Target { get; }
-
-        public Bx1Backend(PlcAssignment target) => Target = target;
+        // The row this instance emits, handed in by the composition root. A second controller of
+        // this kind is another row, not another class.
+        public Bx1Backend(Mapping.TargetDescriptor descriptor) : base(descriptor) { }
 
         public override void EmitDevice(GenerationContext ctx, DeviceScope scope, Action<string> log) =>
             Stage("device emit", log,
-                () => M580.M580Backend.Report(Station2DeviceEmitter.EmitBx1(ctx.Cfg, Target, scope), log));
+                () => M580.M580Backend.Report(Bx1DeviceRenderer.EmitBx1(ctx.Cfg, Target, scope), log));
 
         public override void CopyHardwareConfig(GenerationContext ctx, Action<string> log) =>
             Stage("hcf deploy", log, () =>
