@@ -49,7 +49,8 @@ namespace CodeGen.Devices.Core
 
             void Sync(string when)
             {
-                var n = SysresFbMirror.SyncMirroredFbParametersFromSyslay(ctx.Config.ActiveSyslayPath, sysres);
+                var n = SysresFbMirror.SyncMirroredFbParametersFromSyslay(ctx.Config.ActiveSyslayPath, sysres,
+                    ctx.Cfg.Generation.ProjectNamespace);
                 if (n > 0)
                     report.Missing.Add($"[Wire][{plan.Label}] {when}synced {n} mirrored FB parameter set(s)");
             }
@@ -104,7 +105,7 @@ namespace CodeGen.Devices.Core
                 }
 
                 var recipeSyncCount = SysresFbMirror.SyncProcessRecipesFromSyslay(
-                    cfg.Paths.ActiveSyslayPath, doc, cfg.Manifest);
+                    cfg.Paths.ActiveSyslayPath, doc, cfg.Manifest, cfg.Generation.ProjectNamespace);
                 if (recipeSyncCount > 0)
                     report.Missing.Add(
                         $"[Wire][{tag}] synced {recipeSyncCount} Process recipe(s) from syslay to sysres");
