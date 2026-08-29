@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Control Type="System">
+  <s>
+    <n>DuplicatePlant</n>
+    <SystemID>SYS-dup</SystemID>
+    <Component>
+      <n>Charge_Ram</n>
+      <ComponentID>C-ram</ComponentID>
+      <Type>Actuator</Type>
+      <State><n>Home</n><StateID>S-a-0</StateID><State_Number>0</State_Number><Initial_State>true</Initial_State><StaticState>true</StaticState></State>
+    </Component>
+    <Component>
+      <n>Charge_Ram</n>
+      <ComponentID>C-ram2</ComponentID>
+      <Type>Actuator</Type>
+      <State><n>Home</n><StateID>S-b-0</StateID><State_Number>0</State_Number><StaticState>true</StaticState></State>
+    </Component>
+    <Component>
+      <n>Other_Ram</n>
+      <ComponentID>C-ram</ComponentID>
+      <Type>Actuator</Type>
+      <State><n>Home</n><StateID>S-c-0</StateID><State_Number>0</State_Number><StaticState>true</StaticState></State>
+    </Component>
+  </s>
+</Control>
