@@ -71,7 +71,8 @@ namespace CodeGen.Translation.Process.Recipes
             CodeGen.Domain.Twin.TwinModel twin,
             IReadOnlyDictionary<string, int> processIdByName,
             IReadOnlyDictionary<string, CodeGen.Domain.Twin.ProcessGraph> graphs,
-            Func<VueOneComponent, VueOneComponent, bool> sameRing, Mapping.TemplateIndex manifest)
+            Func<VueOneComponent, VueOneComponent, bool> sameRing, Mapping.TemplateIndex manifest,
+            Configuration.HandoffPolicy handoff)
         {
             var plan = new ProcessHandoffPlan(manifest);
             foreach (var consumer in twin.Processes.Select(p => p.Source))
@@ -85,9 +86,19 @@ namespace CodeGen.Translation.Process.Recipes
                     if (string.Equals(producer.Name?.Trim(), consumer.Name?.Trim(), StringComparison.OrdinalIgnoreCase)) continue;
 
                     var refState = twin.StateOf(producer, cond);
-                    // A reference to the producer's ENTRY phase is answered by the declared handoff
-                    // policy rather than by a phase announcement, so nothing is announced for it here.
-                    if (refState == null || refState.InitialState) continue;
+                    if (refState == null) continue;
+
+                    // A reference to the producer's ENTRY phase is answered by the declared policy for
+                    // THIS edge. Where it is a readiness assertion the plant answers it by having
+                    // started, so nothing is announced. Where it is a runtime phase it is an ordinary
+                    // phase and needs a route like any other - so it is recorded here and gets one.
+                    //
+                    // This skip used to be unconditional and did not consult the policy at all, which
+                    // made runtimePhase declarable but unreachable: the pair was never recorded, so the
+                    // compiler then refused the very edge the declaration had just authorised.
+                    if (refState.InitialState &&
+                        handoff.MeaningFor(producer.Name, consumer.Name, refState.Name)
+                            != Configuration.PeerEntryPhaseMeaning.RuntimePhase) continue;
 
                     if (!processIdByName.TryGetValue(producer.Name?.Trim() ?? string.Empty, out int producerId)) continue;
                     processIdByName.TryGetValue(consumer.Name?.Trim() ?? string.Empty, out int consumerId);
