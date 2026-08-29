@@ -27,7 +27,8 @@ namespace CodeGen.Devices.Core
             var syslayPath = cfg.Paths.ActiveSyslayPath;
             var all = (string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath))
                 ? new List<SysresFbMirror.SyslayFb>()
-                : SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslayPath);
+                : SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslayPath,
+                    ctx.Cfg.Generation.ProjectNamespace);
             if (all.Count == 0) return none;
 
             return ctx.Targets.All
