@@ -71,9 +71,9 @@ namespace MapperTests
 
         private static ReportGraph Build(params VueOneComponent[] components)
         {
-            var twin = TwinModel.Build(components);
+            var twin = TwinModel.Build(components, TestConfig.Cfg.Twin);
             return ReportGraph.Build(twin, Allocation(twin),
-                RigCatalog.Current.CrossRingSegment, Array.Empty<string>(), Graphs(twin), TestConfig.Cfg.Targets);
+                RigCatalog.Current.CrossRingSegment, Graphs(twin), TestConfig.Cfg.Targets);
         }
 
         // Two roster rows on the feed target and two on the assembly target. Nothing here is a Feed or an
@@ -174,10 +174,10 @@ namespace MapperTests
             {
                 Process("C-f", FeedProcess), Process("C-a", AsmProcess),
                 Actuator("C-1", OnFeed, "C-a", "C-a-s0"),
-            });
+            }, TestConfig.Cfg.Twin);
 
             var ex = Assert.Throws<InvalidOperationException>(() => ReportGraph.Build(
-                twin, Allocation(twin), Array.Empty<string>(), Array.Empty<string>(), Graphs(twin),
+                twin, Allocation(twin), Array.Empty<string>(), Graphs(twin),
                 TestConfig.Cfg.Targets));
 
             Assert.Contains("[Transport]", ex.Message, StringComparison.Ordinal);
