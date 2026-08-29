@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Control Type="System">
+  <s>
+    <n>UnknownKindPlant</n>
+    <SystemID>SYS-unknown-kind</SystemID>
+    <Component>
+      <n>Charge_Ram</n>
+      <ComponentID>C-ram</ComponentID>
+      <Type>Actuator</Type>
+      <State><n>Home</n><StateID>S-ram-0</StateID><State_Number>0</State_Number><Initial_State>true</Initial_State><StaticState>true</StaticState></State>
+    </Component>
+    <Component>
+      <n>Kiln_Damper</n>
+      <ComponentID>C-damper</ComponentID>
+      <Type>Servo</Type>
+      <State><n>Shut</n><StateID>S-damper-0</StateID><State_Number>0</State_Number><Initial_State>true</Initial_State><StaticState>true</StaticState></State>
+    </Component>
+  </s>
+</Control>
