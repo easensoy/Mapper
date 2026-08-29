@@ -126,18 +126,21 @@ namespace MapperTests
         {
             // A half-emitted device still deploys, so a stage that fails must stop the run rather than
             // let a later stage write over it and the pipeline report success.
-            var backend = new ThrowingBackend();
+            // Composed from a declared row the way the factory composes one, so the target it names
+            // is the row's - not a name the test spelled and the backend happened to agree with.
+            var declared = TestConfig.Cfg.Targets.All[0];
+            var backend = new ThrowingBackend(declared);
             var ex = Assert.Throws<TargetStageException>(
                 () => backend.Run("device emit", _ => { }, () => throw new InvalidOperationException("disk full")));
 
-            Assert.Equal(PlcAssignment.Named("BX1"), ex.Target);
+            Assert.Equal(declared.Plc, ex.Target);
             Assert.Equal("device emit", ex.Stage);
             Assert.Contains("disk full", ex.Message);
         }
 
         private sealed class ThrowingBackend : TargetBackend
         {
-            public override PlcAssignment Target => PlcAssignment.Named("BX1");
+            public ThrowingBackend(TargetDescriptor d) : base(d) { }
             public void Run(string stage, Action<string> log, Action work) => Stage(stage, log, work);
         }
 
