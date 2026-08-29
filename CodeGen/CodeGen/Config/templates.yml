@@ -5,9 +5,12 @@
 # markup. Physical plant facts (jaw polarity, sensor polarity, timer acknowledgement, which instance
 # plays a semantic role) stay in smc-rig.yml, because they describe the RIG rather than the template.
 #
-# DECLARATION ORDER IS LOAD-BEARING. It is the deploy order - a basic must precede the CAT that
-# instantiates it - and it breaks ties: the first CAT whose protocol serves a twin's state graph wins,
-# which is what puts the sensored five-state CAT ahead of the no-sensors variant.
+# DECLARATION ORDER IS THE DEPLOY ORDER, and only that: a basic must precede the CAT that
+# instantiates it, and the .dfbproj is a generated artefact so the sequence is part of the output.
+#
+# Order does NOT break CAT-selection ties. Two CATs that could both serve one twin graph are refused
+# at load unless they declare different `protocol.priority`, and the higher one wins - so which CAT a
+# plant gets never depends on where a row happens to sit. (This paragraph used to say the opposite.)
 #
 # name            the FB type name, exactly as EAE knows it
 # kind            basic | adapter | composite | hmiCat | cat | dataType   (where its archive lives)
@@ -124,7 +127,6 @@ templates:
       stateCounts: [3, 5, 6]
       command:   { work: 1, home: 3 }
       settled:   { work: 2, home: 0 }
-      interlock: { work: 2, home: 0 }
       target:    { work1: 2, home: 4 }
       # Which twin State_Numbers name each stop. A twin numbers the rest it RETURNS to 4 and the rest it
       # STARTS at 0; this core passes through 4 and settles at 0, so both name home. Declared here so a
@@ -214,12 +216,20 @@ templates:
       stateCounts: [7]
       servesBranched: true
       stopsAreGeometric: true
+      # Two work stops either side of a centre reference, so the shared volume is crossed BOTH ways:
+      # a rule guarding one direction has to guard the other, and the crossing watchdog below
+      # outlasts a single leg. Declared - it used to be inferred from the two stops being SPELLED
+      # work1 and work2, so a CAT naming them anything else silently lost both.
+      crossesBothWays: true
+      # A branched graph is this CAT's specialty, so it outranks any CAT that merely serves that
+      # many states. Equal priority between two CATs that could both serve one graph is REFUSED.
+      priority: 10
       # Its core publishes CurrentRawState in 0..6, so a rule whose From/To falls outside can never
-      # match and is dropped as inert.
+      # match. Generation STOPS on one rather than shipping it: an inert safety rule reports a
+      # guarded machine that is not guarded.
       rawStateRange: { min: 0, max: 6 }
       command:   { work1: 1, work2: 3, home: 5 }
       settled:   { work1: 2, work2: 4, home: 0 }
-      interlock: { work1: 2, work2: 4, home: 6 }
       target:    { work1: 2, work2: 4, home: 6 }
       # Three real places, so 4 is Work2 here rather than a second name for home - which is exactly why
       # this belongs to the CAT and not to the compiler.
@@ -262,7 +272,6 @@ templates:
       stateCounts: [4]
       command:   { work: 1, home: 3 }
       settled:   { work: 2, home: 0 }
-      interlock: { work: 2, home: 0 }
       stops:
         home: [0]
         work: [2]
@@ -279,7 +288,21 @@ templates:
   - { name: Telemetry,            kind: composite, role: infrastructure, mirrorToSysres: true,
       infraRoles: [mqttConnectionWrapped] }
   - { name: MqttStateFormatter,   kind: basic,     role: infrastructure, mirrorToSysres: true, infraRoles: [mqttFormatter] }
-  - { name: MQTT_PUBLISH_115480E69E664F878, kind: basic, role: infrastructure, mirrorToSysres: true }
+  - { name: MQTT_PUBLISH_115480E69E664F878, kind: basic, role: infrastructure, mirrorToSysres: true,
+      infraRoles: [mqttPublish] }
 
   - { name: Component_State,     kind: dataType, role: infrastructure, deploy: true }
   - { name: Component_State_Msg, kind: dataType, role: infrastructure, deploy: true }
+
+  # DEPLOYED BY A STAGE THAT ALSO TRANSFORMS THEM, so `deploy` stays false: the generic pass would
+  # copy them and then the patch that gives them their shape would run against a copy nobody ordered.
+  # What they ARE and which role each serves is declared here all the same, so no deployer spells a
+  # file name; the ORDER they are written in, and the edits that follow, stay in the deployer.
+  - { name: changeEventM262_2, kind: basic, role: infrastructure, infraRoles: [couplerChangeEvent] }
+  # Force-re-extracted first, so a corrected safe-start type reaches an already-generated tree.
+  - { name: Bx1CoverFailsafe,  kind: basic, role: infrastructure, forceRefresh: true,
+      infraRoles: [coverSafeStartGate] }
+  # Each coupler broker is deployed and then has its symlink bridge internalised, so the resource
+  # instantiates only the broker. The RevPi one only when this run relocates something onto it.
+  - { name: PLC_RW_BX1,        kind: composite, role: infrastructure, infraRoles: [etherNetIpBroker] }
+  - { name: PLC_RW_REVPI,      kind: composite, role: infrastructure, infraRoles: [modbusBroker] }
