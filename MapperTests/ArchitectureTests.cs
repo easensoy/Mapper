@@ -119,7 +119,7 @@ namespace MapperTests
             {
                 if (ConfigurationLayer.Contains(Rel(f), StringComparer.OrdinalIgnoreCase)) continue;
                 foreach (Match m in Regex.Matches(CodeOf(f),
-                             @"(DeviceConfig|GenerationConfig|TelemetrySettings|RigCatalog|InterlockConfig|TemplateCatalog|SecurityProfile)[.]Current|CompilerConfiguration[.]Default"))
+                             @"(DeviceConfig|GenerationConfig|TelemetrySettings|RigCatalog|TemplateCatalog|SecurityProfile)[.]Current|CompilerConfiguration[.]Default"))
                     breaches.Add(Rel(f) + " -> " + m.Value);
             }
             NoBreaches(breaches,
@@ -142,8 +142,6 @@ namespace MapperTests
             "CodeGen/CodeGen/Application/GenerateProject.cs",           // the composition root
             "CodeGen/CodeGen/Input/Settings/MapperConfig.cs",           // the loader itself
             "CodeGen/CodeGen/Mapping/LayoutCatalog.cs",                 // the loader itself
-            "CodeGen/CodeGen/Artefacts/Templates/DemonstratorWiper.cs", // Wipe(string): VueOne runner
-            "CodeGen/CodeGen/Devices/Common/OpcuaCompanionEmitter.cs",  // the two no-cfg entry points
             "CodeGen/CodeGen/Devices/Common/FoldersXmlEmitter.cs",      // Register(MapperConfig): HMI module
             "MapperUI/Forms/MainForm.cs",                               // the UI composition root
         };
@@ -209,8 +207,6 @@ namespace MapperTests
                          Rel(p).StartsWith("CodeGen/CodeGen/Domain/", StringComparison.Ordinal) ||
                          Rel(p).StartsWith("CodeGen/CodeGen/Planning/", StringComparison.Ordinal)))
             {
-                if (Rel(f).EndsWith("Planning/Interlocks/InterlockConfig.cs", StringComparison.Ordinal))
-                    continue;                       // the loader of its own declaration
                 foreach (Match m in Regex.Matches(CodeOf(f),
                              @"(?<![.\w])(TargetRegistry|TemplateManifest|TargetBootstrap|RingHost|ProcessPhaseTransport)(?![\w])|" +
                              @"CompilerConfiguration[.]Default|" +
@@ -351,7 +347,7 @@ namespace MapperTests
             var emitters = new[]
             {
                 "M262SysdevEmitter.Emit", "M262TopologyEmitter.Emit",
-                "Station2DeviceEmitter.EmitM580", "Station2DeviceEmitter.EmitBx1",
+                "EaeDeviceWriter.EmitM580", "EaeDeviceWriter.EmitBx1",
                 "RevPiDeviceEmitter.EmitDevice", "HwConfigVerbatimCopier.CopyFor",
             };
             var breaches = new List<string>();
@@ -565,7 +561,7 @@ namespace MapperTests
             var carriers = new[]
             {
                 "CompilerConfiguration", "DeviceConfig", "GenerationConfig", "TelemetrySettings",
-                "RigCatalog", "InterlockConfig", "TemplateCatalog", "LayoutCatalog", "SecurityProfile",
+                "RigCatalog", "TemplateCatalog", "LayoutCatalog", "SecurityProfile",
                 "ITargetBackend", "GenerationContext", "DeploymentProfile", "CompilerSession",
             };
 
