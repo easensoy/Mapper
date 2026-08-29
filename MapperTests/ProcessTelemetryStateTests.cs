@@ -96,7 +96,7 @@ namespace MapperTests
         public void TheTwinsStateNumberCannotIdentifyAPhase(string processName)
         {
             if (!ModelAvailable("_se")) return;   // model not present on this machine
-            var all = new SystemXmlReader().ReadAllComponents(ModelPath("_se"));
+            var all = new SystemXmlReader(TestConfig.Cfg.Twin).ReadAllComponents(ModelPath("_se"));
             var process = all.Single(c =>
                 string.Equals(c.Type, "Process", StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(c.Name, processName, StringComparison.OrdinalIgnoreCase));
