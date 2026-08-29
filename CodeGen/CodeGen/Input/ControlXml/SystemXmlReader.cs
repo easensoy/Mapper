@@ -5,52 +5,71 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using CodeGen.Configuration;
 using CodeGen.Models;
 
 namespace CodeGen.IO
 {
+    // THE frontend. The only thing in this compiler that parses VueOne XML.
+    //
+    // It is FAIL-CLOSED, and that is the whole design. It used to accumulate a LastError string that
+    // nothing outside this file ever read, and return whatever it had managed to parse - so a
+    // malformed file, an unrecognised root, a missing system element and a component that threw
+    // mid-parse all produced an EMPTY OR PARTIAL model that the pipeline then compiled and published
+    // as a success. Every one of those now stops the run with a diagnostic naming what it could not
+    // read. Nothing here returns a partial model.
+    //
+    // What it is deliberately TOLERANT of is VueOne's own spelling: <n> vs <Name>, and an encoding
+    // declaration that disagrees with the bytes. Those are known properties of real exported twins,
+    // not corruption, and refusing them would refuse files that are perfectly readable.
     public class SystemXmlReader
     {
+        private readonly TwinSchema _schema;
+
         public string SystemName { get; private set; } = string.Empty;
-        public string SystemID { get; private set; } = string.Empty;
-        public string LastError { get; private set; } = string.Empty;
+
+        /// The schema names the component-kind vocabulary this reader classifies against. A run passes
+        /// its OWN snapshot's schema so two runs holding different profiles cannot read one twin two ways.
+        public SystemXmlReader(TwinSchema schema) =>
+            _schema = schema ?? throw new ArgumentNullException(nameof(schema));
 
         public List<VueOneComponent> ReadAllComponents(string xmlFilePath)
         {
+            if (string.IsNullOrWhiteSpace(xmlFilePath))
+                throw new ArgumentException("Control.xml path is required.", nameof(xmlFilePath));
+            if (!File.Exists(xmlFilePath))
+                throw new FileNotFoundException($"Control.xml not found: {xmlFilePath}", xmlFilePath);
+
             var components = new List<VueOneComponent>();
             SystemName = string.Empty;
-            SystemID = string.Empty;
-            LastError = string.Empty;
 
+            XDocument doc;
             try
             {
-                var doc = LoadXmlTolerant(xmlFilePath);
-                var root = doc.Root;
-
-                if (root == null)
-                {
-                    LastError = "XML root is null";
-                    return components;
-                }
-
-                var fileType = root.Attribute("Type")?.Value ?? string.Empty;
-                LastError = $"Type={fileType}, Root={root.Name.LocalName}";
-
-                if (string.Equals(fileType, "System", StringComparison.OrdinalIgnoreCase))
-                    ReadSystemFile(root, components);
-                else if (string.Equals(fileType, "Component", StringComparison.OrdinalIgnoreCase))
-                    ReadComponentFile(root, components);
-                else
-                    LastError += $" — unrecognised Type '{fileType}'";
+                doc = LoadXmlTolerant(xmlFilePath);
             }
-            catch (InvalidOperationException)
+            catch (Exception ex) when (ex is not InvalidOperationException)
             {
-                throw;   // a schema the compiler does not understand: never read as "no components"
+                throw new InvalidOperationException(
+                    $"[Twin] '{xmlFilePath}' is not readable as XML: {ex.Message}. Generation stops " +
+                    "rather than compiling whatever parsed.", ex);
             }
-            catch (Exception ex)
-            {
-                LastError = $"Exception: {ex.Message}";
-            }
+
+            var root = doc.Root
+                ?? throw new InvalidOperationException(
+                    $"[Twin] '{xmlFilePath}' has no root element, so it declares no model.");
+
+            var fileType = root.Attribute("Type")?.Value ?? string.Empty;
+
+            if (string.Equals(fileType, "System", StringComparison.OrdinalIgnoreCase))
+                ReadSystemFile(root, components, xmlFilePath);
+            else if (string.Equals(fileType, "Component", StringComparison.OrdinalIgnoreCase))
+                ReadComponentFile(root, components, xmlFilePath);
+            else
+                throw new InvalidOperationException(
+                    $"[Twin] '{xmlFilePath}' declares root <{root.Name.LocalName} Type=" +
+                    $"'{(fileType.Length == 0 ? "(absent)" : fileType)}'>. This compiler reads a VueOne " +
+                    "export of Type 'System' or Type 'Component' and will not guess at another schema.");
 
             return components;
         }
@@ -99,68 +118,104 @@ namespace CodeGen.IO
             return XDocument.Parse(content);
         }
 
-        private void ReadSystemFile(XElement root, List<VueOneComponent> components)
+        private void ReadSystemFile(XElement root, List<VueOneComponent> components, string path)
         {
             var s = root.Elements()
                 .FirstOrDefault(e => e.Name.LocalName == "s" ||
                                      e.Name.LocalName == "System");
 
             if (s == null)
-            {
-                LastError += $" — no <s> element. Children: [{string.Join(", ", root.Elements().Select(e => e.Name.LocalName))}]";
-                return;
-            }
+                throw new InvalidOperationException(
+                    $"[Twin] '{path}' declares Type='System' but carries no <s> or <System> element, " +
+                    "so there is nothing to read the components out of. Children found: " +
+                    $"[{string.Join(", ", root.Elements().Select(e => e.Name.LocalName))}].");
 
             SystemName = GetElementValue(s, "n");
             if (string.IsNullOrWhiteSpace(SystemName))
                 SystemName = GetElementValue(s, "Name");
 
-            SystemID = GetElementValue(s, "SystemID");
-            LastError += $", System='{SystemName}', ID={SystemID}";
-
             var componentElements = s.Elements()
                 .Where(e => e.Name.LocalName == "Component").ToList();
 
-            LastError += $", Components={componentElements.Count}";
-
-            foreach (var elem in componentElements)
+            // Every component is attempted, so ONE run reports EVERY unreadable row rather than making
+            // the engineer fix them one generation at a time. A single failure still stops the run.
+            var problems = new List<string>();
+            for (int i = 0; i < componentElements.Count; i++)
             {
                 try
                 {
-                    var c = ParseComponent(elem, isSystemFile: true);
-                    if (!string.Equals(c.Type, "NonControl", StringComparison.OrdinalIgnoreCase))
-                        components.Add(c);
+                    var c = ParseComponent(componentElements[i], isSystemFile: true);
+                    if (c.Kind != ComponentKind.Excluded) components.Add(c);
                 }
-                catch (InvalidOperationException) { throw; }   // a schema we cannot read, not a bad row
-                catch (Exception ex) { LastError += $", ParseError:{ex.Message}"; }
+                catch (Exception ex)
+                {
+                    problems.Add($"component #{i + 1}" + Identify(componentElements[i]) + $": {ex.Message}");
+                }
             }
+
+            if (problems.Count > 0)
+                throw new InvalidOperationException(
+                    $"[Twin] '{path}' has {problems.Count} component(s) this compiler cannot read:" +
+                    Environment.NewLine + "  - " + string.Join(Environment.NewLine + "  - ", problems) +
+                    Environment.NewLine +
+                    "Generation stops rather than compiling the components that did parse.");
         }
 
-        private void ReadComponentFile(XElement root, List<VueOneComponent> components)
+        // Enough of the failing element to find it in the file, without assuming it parsed.
+        private static string Identify(XElement elem)
         {
-            var elem = root.Elements().FirstOrDefault(e => e.Name.LocalName == "Component");
-            if (elem != null)
-                components.Add(ParseComponent(elem, isSystemFile: false));
+            var name = elem.Elements().FirstOrDefault(e => e.Name.LocalName is "n" or "Name")?.Value.Trim();
+            var id = elem.Elements().FirstOrDefault(e => e.Name.LocalName == "ComponentID")?.Value.Trim();
+            if (!string.IsNullOrEmpty(name)) return $" '{name}'";
+            return string.IsNullOrEmpty(id) ? string.Empty : $" (ComponentID {id})";
+        }
+
+        private void ReadComponentFile(XElement root, List<VueOneComponent> components, string path)
+        {
+            var elem = root.Elements().FirstOrDefault(e => e.Name.LocalName == "Component")
+                ?? throw new InvalidOperationException(
+                    $"[Twin] '{path}' declares Type='Component' but carries no <Component> element.");
+
+            var c = ParseComponent(elem, isSystemFile: false);
+            if (c.Kind != ComponentKind.Excluded) components.Add(c);
         }
 
         private VueOneComponent ParseComponent(XElement elem, bool isSystemFile)
         {
+            // VueOne writes <n> in a system export and <Name> in a single-component one, and older
+            // exports carry only <VcID>. All three are real spellings of the same fact.
             var name = GetElementValue(elem, "n");
             if (string.IsNullOrEmpty(name)) name = GetElementValue(elem, "Name");
             if (string.IsNullOrEmpty(name)) name = GetElementValue(elem, "VcID");
-            if (string.IsNullOrEmpty(name))
-            {
-                var id = GetElementValue(elem, "ComponentID");
-                name = id.Length >= 8 ? $"Component_{id.Substring(0, 8)}" : "Component_unknown";
-            }
+
+            var componentId = GetElementValue(elem, "ComponentID");
+
+            // A component with no name cannot be placed on a roster row, addressed on the ring or bound
+            // to a channel; the predecessor invented `Component_<id-prefix>` for it, which generated a
+            // plant with a machine-made name that matched nothing an engineer had declared.
+            if (string.IsNullOrWhiteSpace(name))
+                throw new InvalidOperationException(
+                    "carries no <n>, <Name> or <VcID>, so it cannot be named on a roster row, " +
+                    "addressed on the report ring, or bound to a channel");
+
+            // Every guard in the twin references its target BY ComponentID. A component without one can
+            // be declared but never referred to, and a second such component cannot be told from it.
+            if (string.IsNullOrWhiteSpace(componentId))
+                throw new InvalidOperationException(
+                    $"'{name}' carries no <ComponentID>, which is how every condition in the twin " +
+                    "references a component, so nothing could refer to it");
+
+            var type = GetElementValue(elem, "Type");
 
             var component = new VueOneComponent
             {
-                ComponentID = GetElementValue(elem, "ComponentID"),
+                ComponentID = componentId,
                 Name = name,
                 VcID = GetElementValue(elem, "VcID"),
                 Description = GetElementValue(elem, "Description"),
-                Type = GetElementValue(elem, "Type"),
+                Type = type,
+                // THE ONE PLACE a token becomes a kind. Refuses an unmapped token by name.
+                Kind = _schema.KindOf(type, name),
                 NameTag = isSystemFile ? "n" : "Name"
             };
 
