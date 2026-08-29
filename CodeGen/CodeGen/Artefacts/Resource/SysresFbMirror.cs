@@ -11,7 +11,7 @@ namespace CodeGen.Devices.Core
 {
     public static class SysresFbMirror
     {
-        const string LibElNs = Station2DeviceEmitter.LibElNs;
+        const string LibElNs = EaeDeviceWriter.LibElNs;
 
 
 
@@ -21,7 +21,7 @@ namespace CodeGen.Devices.Core
             string X, string Y, List<SyslayFbParameter> Parameters,
             List<SyslayFbAttribute> Attributes);
 
-        public static List<SyslayFb> ReadSyslayTopLevelFbs(string syslayPath)
+        public static List<SyslayFb> ReadSyslayTopLevelFbs(string syslayPath, string projectNamespace)
         {
             var doc = XDocument.Load(syslayPath);
             var root = doc.Root;
@@ -29,16 +29,16 @@ namespace CodeGen.Devices.Core
             XNamespace ns = root.GetDefaultNamespace();
             var net = root.Element(ns + "SubAppNetwork") ?? root.Element(ns + "FBNetwork");
             if (net == null) return new List<SyslayFb>();
-            return Project(net.Elements(ns + "FB"));
+            return Project(net.Elements(ns + "FB"), projectNamespace);
         }
 
         // Children matched by local name, so this serves the namespaced .syslay and System.hash alike.
-        static List<SyslayFb> Project(IEnumerable<XElement> fbs) =>
+        static List<SyslayFb> Project(IEnumerable<XElement> fbs, string projectNamespace) =>
             fbs.Select(e => new SyslayFb(
                     Id:        (string?)e.Attribute("ID")        ?? string.Empty,
                     Name:      (string?)e.Attribute("Name")      ?? string.Empty,
                     Type:      (string?)e.Attribute("Type")      ?? string.Empty,
-                    Namespace: (string?)e.Attribute("Namespace") ?? Configuration.GenerationConfig.Namespace,
+                    Namespace: (string?)e.Attribute("Namespace") ?? projectNamespace,
                     X:         (string?)e.Attribute("x")         ?? "0",
                     Y:         (string?)e.Attribute("y")         ?? "0",
                     Parameters: Named(e, "Parameter")
@@ -57,16 +57,19 @@ namespace CodeGen.Devices.Core
 
         static string Attr(XElement e, string name) => (string?)e.Attribute(name) ?? string.Empty;
 
-        public static List<SyslayFb> ReadTopLevelFbsWithSystemModelFallback(string syslayPath)
+        public static List<SyslayFb> ReadTopLevelFbsWithSystemModelFallback(
+            string syslayPath, string projectNamespace)
         {
             if (!string.IsNullOrWhiteSpace(syslayPath) && File.Exists(syslayPath))
             {
-                var direct = ReadSyslayTopLevelFbs(syslayPath);
+                var direct = ReadSyslayTopLevelFbs(syslayPath, projectNamespace);
                 if (direct.Count > 0) return direct;
             }
 
             var systemHash = FindSystemHashBeside(syslayPath);
-            return systemHash == null ? new List<SyslayFb>() : ReadSystemHashFbs(systemHash);
+            return systemHash == null
+                ? new List<SyslayFb>()
+                : ReadSystemHashFbs(systemHash, projectNamespace);
         }
 
         static string? FindSystemHashBeside(string syslayPath)
@@ -84,10 +87,10 @@ namespace CodeGen.Devices.Core
             return null;
         }
 
-        static List<SyslayFb> ReadSystemHashFbs(string systemHashPath)
+        static List<SyslayFb> ReadSystemHashFbs(string systemHashPath, string projectNamespace)
         {
             var doc = XDocument.Load(systemHashPath);
-            return Project(doc.Descendants().Where(e => e.Name.LocalName == "FB"));
+            return Project(doc.Descendants().Where(e => e.Name.LocalName == "FB"), projectNamespace);
         }
 
         public static int MirrorFbsIntoSysres(string sysresPath, List<SyslayFb> syslayFbs,
@@ -229,33 +232,36 @@ namespace CodeGen.Devices.Core
         // its old parameters would deploy a stale recipe with no error. Matched by Name, then by the
         // Mapping attribute (I-9: an FB's Mapping is a separate GUID carrying the syslay id).
         public static int SyncProcessRecipesFromSyslay(string syslayPath, XDocument sysresDoc,
-            Mapping.TemplateIndex manifest) =>
-            SyncFromSyslay(syslayPath, sysresDoc, t => IsProcessEngine(t, manifest));
+            Mapping.TemplateIndex manifest, string projectNamespace) =>
+            SyncFromSyslay(syslayPath, sysresDoc, t => IsProcessEngine(t, manifest), projectNamespace);
 
-        public static int SyncMirroredFbParametersFromSyslay(string syslayPath, string sysresPath) =>
-            SyncFromSyslay(syslayPath, sysresPath, _ => true);
+        public static int SyncMirroredFbParametersFromSyslay(string syslayPath, string sysresPath,
+            string projectNamespace) =>
+            SyncFromSyslay(syslayPath, sysresPath, _ => true, projectNamespace);
 
         private static bool IsProcessEngine(string type, Mapping.TemplateIndex manifest) =>
             string.Equals(type, manifest.ProcessType.Name, StringComparison.Ordinal);
 
-        private static int SyncFromSyslay(string syslayPath, string sysresPath, Func<string, bool> selects)
+        private static int SyncFromSyslay(string syslayPath, string sysresPath, Func<string, bool> selects,
+            string projectNamespace)
         {
             if (string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath)) return 0;
             if (string.IsNullOrWhiteSpace(sysresPath) || !File.Exists(sysresPath)) return 0;
 
             var doc = XDocument.Load(sysresPath);
-            var changed = SyncFromSyslay(syslayPath, doc, selects);
+            var changed = SyncFromSyslay(syslayPath, doc, selects, projectNamespace);
             if (changed > 0) doc.Save(sysresPath);
             return changed;
         }
 
-        private static int SyncFromSyslay(string syslayPath, XDocument sysresDoc, Func<string, bool> selects)
+        private static int SyncFromSyslay(string syslayPath, XDocument sysresDoc, Func<string, bool> selects,
+            string projectNamespace)
         {
             if (string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath)) return 0;
             var root = sysresDoc.Root;
             if (root == null) return 0;
 
-            var sourceByName = ReadTopLevelFbsWithSystemModelFallback(syslayPath)
+            var sourceByName = ReadTopLevelFbsWithSystemModelFallback(syslayPath, projectNamespace)
                 .Where(f => selects(f.Type) && f.Parameters.Count > 0)
                 .ToDictionary(f => f.Name, StringComparer.Ordinal);
             var sourceById = sourceByName.Values
