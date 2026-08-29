@@ -28,13 +28,12 @@ namespace CodeGen.Translation
         // both canvases init them after the process rather than in front of it.
         public IReadOnlyList<string> DischargeTail { get; }
         public IReadOnlyList<string> DischargeSegment { get; }
-        public IReadOnlyList<string> DetouredChain { get; }
         public bool RingsMerged => _merged;
 
         private ReportGraph(ControllerAllocation allocation, bool merged,
             IReadOnlyDictionary<PlcAssignment, ReportDomainId> domainOf,
             IReadOnlyDictionary<string, PlcAssignment> carriedOnto,
-            IReadOnlyList<string> discharge, IReadOnlyList<string> detour,
+            IReadOnlyList<string> discharge,
             IReadOnlyList<string> dischargeTail)
         {
             DischargeTail = dischargeTail;
@@ -43,7 +42,6 @@ namespace CodeGen.Translation
             _domainOf = domainOf;
             _carriedOnto = carriedOnto;
             DischargeSegment = discharge;
-            DetouredChain = detour;
         }
 
         // The ring a component's announcements reach in the finished topology: its own target's, unless a
@@ -54,8 +52,10 @@ namespace CodeGen.Translation
             return DomainOf(_carriedOnto.TryGetValue(trimmed, out var host) ? host : _allocation.Of(trimmed));
         }
 
-        // The same identity as an opaque grouping key, for a consumer that only partitions by it. It is a
-        // rendering of the id, never a name anything matches on.
+        // The same identity as an opaque grouping key. The separately-owned HMI module partitions its
+        // slot index by it (Hmi/Semantics/HmiSemanticModelBuilder.cs), which needs a value it can use
+        // as a dictionary key rather than the typed id. It is a RENDERING of that id - never a name
+        // anything matches on, and never a second answer to which ring a component reports onto.
         public string Domain(string? name) => DomainId(name).ToString();
 
         // The target whose ring carries this component's reports, where a carrier lifted it off its own.
@@ -107,17 +107,17 @@ namespace CodeGen.Translation
         // the consumer's own state_table. Both are proved against the same graph.
         public static ReportGraph Build(
             TwinModel twin, ControllerAllocation allocation,
-            IReadOnlyList<string> declaredDischarge, IReadOnlyList<string> detouredChain,
+            IReadOnlyList<string> declaredDischarge,
             IReadOnlyDictionary<string, CodeGen.Domain.Twin.ProcessGraph> graphs, Mapping.TargetIndex targets)
         {
             var graph = Assemble(twin, allocation, ProcessesNeedOneRing(twin, allocation, graphs),
-                declaredDischarge, detouredChain, targets);
+                declaredDischarge, targets);
 
             // Folding the rings into one is the declared carrier that spans every domain, so it is what
             // an interlock reaching across them needs. Applied only when something actually needs it.
             if (!graph.RingsMerged && Crossings(twin, graph).Count > 0)
                 graph = Assemble(twin, allocation, merged: true, targets: targets,
-                    declaredDischarge: declaredDischarge, detouredChain: detouredChain);
+                    declaredDischarge: declaredDischarge);
 
             var stranded = Crossings(twin, graph);
             if (stranded.Count > 0)
@@ -147,8 +147,7 @@ namespace CodeGen.Translation
 
         private static ReportGraph Assemble(
             TwinModel twin, ControllerAllocation allocation, bool merged,
-            IReadOnlyList<string> declaredDischarge, IReadOnlyList<string> detouredChain,
-            Mapping.TargetIndex targets)
+            IReadOnlyList<string> declaredDischarge, Mapping.TargetIndex targets)
         {
             var edges = RequiredEdges(twin, allocation);
 
@@ -199,7 +198,7 @@ namespace CodeGen.Translation
             foreach (var e in edges.Where(OnDischarge)) carriedOnto[e.Target] = e.From;
 
             return new ReportGraph(allocation, merged, finished.Domains(), carriedOnto,
-                discharge, detouredChain, discharge.Where(commanded.Contains).ToList());
+                discharge, discharge.Where(commanded.Contains).ToList());
         }
 
         // Targets grouped by the ring they share. Every declared target starts alone; a carrier joins two.
