@@ -18,6 +18,7 @@ namespace CodeGen.Configuration
         // configs and the project it writes. Deployment facts live in the YAML below, not here.
         public MapperConfig Paths { get; }
 
+        public TwinSchema Twin { get; }                          // Config/twin-schema.yml
         public DeviceConfig Devices { get; }                     // Config/device.yml
         public GenerationConfig Generation { get; }              // Config/config.yaml
         public TelemetrySettings Telemetry { get; }              // Config/telemetry.yml
@@ -37,12 +38,13 @@ namespace CodeGen.Configuration
         public Mapping.TemplateIndex Manifest { get; }
         public Mapping.TargetIndex Targets { get; }
 
-        private CompilerConfiguration(MapperConfig paths, DeviceConfig devices,
+        private CompilerConfiguration(MapperConfig paths, TwinSchema twin, DeviceConfig devices,
             GenerationConfig generation, TelemetrySettings telemetry, RigCatalog rig,
             Translation.Interlocks.InterlockConfig interlocks, TemplateCatalog templates,
             LayoutCatalog layout, SecurityProfile security)
         {
             Paths = paths;
+            Twin = twin;
             Devices = devices;
             Generation = generation;
             Telemetry = telemetry;
@@ -68,17 +70,17 @@ namespace CodeGen.Configuration
         // a run at its staging copy; every other path the compiler resolves is derived from these.
         public CompilerConfiguration With(MapperConfig paths) =>
             new(paths ?? throw new ArgumentNullException(nameof(paths)),
-                Devices, Generation, Telemetry, Rig, Interlocks, Templates, Layout, Security);
+                Twin, Devices, Generation, Telemetry, Rig, Interlocks, Templates, Layout, Security);
 
         // The same run against different device declarations. A caller that needs to ask "what would
         // this validator say about THESE addresses" gets a new snapshot rather than mutating a shared
         // one, so two callers cannot see each other's overrides.
         public CompilerConfiguration With(DeviceConfig devices) =>
-            new(Paths, devices ?? throw new ArgumentNullException(nameof(devices)),
+            new(Paths, Twin, devices ?? throw new ArgumentNullException(nameof(devices)),
                 Generation, Telemetry, Rig, Interlocks, Templates, Layout, Security);
 
         public CompilerConfiguration With(LayoutCatalog layout) =>
-            new(Paths, Devices, Generation, Telemetry, Rig, Interlocks, Templates,
+            new(Paths, Twin, Devices, Generation, Telemetry, Rig, Interlocks, Templates,
                 layout ?? throw new ArgumentNullException(nameof(layout)), Security);
 
         // THE PROCESS-WIDE SNAPSHOT OF THE SHIPPED BUNDLE. It exists for the compatibility facades
@@ -99,6 +101,7 @@ namespace CodeGen.Configuration
         // the same time without either one seeing the other's.
         public static CompilerConfiguration Load(MapperConfig paths, string? profileRoot = null) =>
             new(paths ?? throw new ArgumentNullException(nameof(paths)),
+                TwinSchema.LoadFrom(profileRoot),
                 DeviceConfig.LoadFrom(profileRoot),
                 GenerationConfig.LoadFrom(profileRoot),
                 TelemetrySettings.LoadFrom(profileRoot),
