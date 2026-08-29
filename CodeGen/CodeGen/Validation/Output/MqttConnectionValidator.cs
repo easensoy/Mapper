@@ -134,7 +134,7 @@ namespace CodeGen.Devices.Core
             {
                 var dir = Path.GetDirectoryName(sysresPath);
                 if (string.IsNullOrEmpty(dir)) return false;
-                var props = Path.Combine(dir, CodeGen.Devices.Core.Station2DeviceEmitter.DeployPluginPropertiesFile(cfg));
+                var props = Path.Combine(dir, CodeGen.Devices.Core.EaeDeviceWriter.DeployPluginPropertiesFile(cfg));
                 if (!File.Exists(props)) return false;
                 return XDocument.Load(props).Descendants()
                     .Any(e => e.Name.LocalName == "Property"
