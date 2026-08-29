@@ -13,7 +13,7 @@ using CodeGen.Services;
 namespace CodeGen.Devices.RevPi
 {
     // The Revolution Pi as an EAE deployment target. It is NOT a new kind of controller: its .sysdev is
-    // Type="Soft_dPAC" like the BX1's, so the whole device shell comes from Station2DeviceEmitter.EmitOnePlc.
+    // Type="Soft_dPAC" like the BX1's, so the whole device shell comes from EaeDeviceWriter.EmitOnePlc.
     // Only the RevPi DELTA lives here: the equipment document (a Workstation host with a child NIC, and a
     // Soft dPAC container on a Docker macvlan parented to it), the Modbus hardware config, and moving
     // relocated components off whichever resource used to host them. See Docs/REVPI_PROVISIONING.md.
@@ -56,8 +56,8 @@ namespace CodeGen.Devices.RevPi
             SweepFromOtherResources(cfg.Generation.FileWriteRetries, systemGuidDir, self.Identity.Sysdev, hosted, report);
 
             var solutionId = EaeProjectLayout.ReadProjectGuid(eaeRoot!) ?? NoDomainUuid;
-            var shell = new Station2DeviceEmitter.EmitResult();
-            Station2DeviceEmitter.EmitOnePlc(cfg, self, eaeRoot!, systemGuidDir, shell,
+            var shell = new EaeDeviceWriter.EmitResult();
+            EaeDeviceWriter.EmitOnePlc(cfg, self, eaeRoot!, systemGuidDir, shell,
                 sysdevId: self.Identity.Sysdev,
                 deviceName: DeviceName(self),
                 deviceType: self.DeviceType,
@@ -68,7 +68,7 @@ namespace CodeGen.Devices.RevPi
                 equipmentBuilder: () => EquipmentJson(cfg, self, solutionId,
                     cfg.Devices.NetworkOf(self.Plc.Name).HostIp,
                     cfg.Devices.NetworkOf(self.Plc.Name).TargetIp),
-                deployPluginPropertiesXml: Station2DeviceEmitter.BuildSoftDpacDeployPluginPropertiesXml(cfg,
+                deployPluginPropertiesXml: EaeDeviceWriter.BuildSoftDpacDeployPluginPropertiesXml(cfg,
                     cfg.Telemetry.PublishEnabled && !cfg.Telemetry.SecureTls),
                 simulationBindingDeployPort: self.SimulationDeployPort,
                 simulationBindingArchivePort: self.SimulationArchivePort);
@@ -83,7 +83,8 @@ namespace CodeGen.Devices.RevPi
             var syslay = cfg.Paths.ActiveSyslayPath;
             if (File.Exists(sysres) && !string.IsNullOrWhiteSpace(syslay) && File.Exists(syslay))
             {
-                var fbs = SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslay)
+                var fbs = SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(
+                        syslay, ctx.Cfg.Generation.ProjectNamespace)
                     .Where(f => SysresFbMirror.BucketFor(f.Name, ctx.Allocation, ctx.Cfg) == target)
                     .ToList();
                 int mirrored = SysresFbMirror.MirrorFbsIntoSysres(sysres, fbs,
@@ -127,7 +128,8 @@ namespace CodeGen.Devices.RevPi
             {
                 try
                 {
-                    if (RevPiIoBrokerInjector.PlaceBroker(coupler, target, path, isResource, hosted, ctx.Layout, bootFb))
+                    if (RevPiIoBrokerInjector.PlaceBroker(coupler, target, path, isResource, hosted, ctx.Layout, bootFb,
+                            ctx.Cfg.Generation.ProjectNamespace))
                         written++;
                 }
                 catch (IOException)
