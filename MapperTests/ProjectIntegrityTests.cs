@@ -48,7 +48,7 @@ namespace MapperTests
         [Fact]
         public void A_project_whose_every_reference_resolves_passes()
         {
-            WriteSyslay(Syslay, "Real_Type", GenerationConfig.Namespace);
+            WriteSyslay(Syslay, "Real_Type", TestConfig.Cfg.Generation.ProjectNamespace);
             var (registrations, types) = ProjectIntegrityValidator.Validate(Config());
             Assert.Equal(0, registrations);            // nothing registered yet, nothing dangling
             Assert.Equal(1, types);                    // and the one referenced type is deployed
@@ -59,7 +59,7 @@ namespace MapperTests
         {
             // EAE reports this under Solution Integrity and quietly drops the item, so the project opens
             // looking correct while missing whatever the entry named.
-            WriteSyslay(Syslay, "Real_Type", GenerationConfig.Namespace);
+            WriteSyslay(Syslay, "Real_Type", TestConfig.Cfg.Generation.ProjectNamespace);
             File.WriteAllText(Dfbproj,
                 "<Project><ItemGroup><None Include=\"DoesNotExist.fbt\" /></ItemGroup></Project>");
 
@@ -73,7 +73,7 @@ namespace MapperTests
         {
             // ERR_NO_SUCH_TYPE: the resource loads and the instance is simply not there, which on a rig
             // reads as "the actuator does nothing" rather than as a build failure.
-            WriteSyslay(Syslay, "Type_That_Was_Never_Deployed", GenerationConfig.Namespace);
+            WriteSyslay(Syslay, "Type_That_Was_Never_Deployed", TestConfig.Cfg.Generation.ProjectNamespace);
 
             var boom = Assert.Throws<InvalidOperationException>(() => ProjectIntegrityValidator.Validate(Config()));
             Assert.Contains("TYPE NOT DEPLOYED", boom.Message);
