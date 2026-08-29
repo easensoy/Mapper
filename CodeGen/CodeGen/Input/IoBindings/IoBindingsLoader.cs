@@ -28,14 +28,6 @@ namespace CodeGen.Translation
         public Dictionary<string, PinAssignment> PinAssignments { get; init; } =
             new(StringComparer.OrdinalIgnoreCase);
 
-
-        // The literal quotes are required by the EAE .hcf schema. Null leaves the baseline Value untouched.
-        public string? ResolveSymbol(string pin)
-        {
-            if (string.IsNullOrWhiteSpace(pin)) return null;
-            if (!PinAssignments.TryGetValue(pin, out var assignment)) return null;
-            return $"'RES0.{assignment.ComponentName}.{assignment.Port}'";
-        }
     }
 
     public class IoBindingsLoader
