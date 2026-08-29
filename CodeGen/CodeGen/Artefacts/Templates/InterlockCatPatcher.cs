@@ -30,6 +30,91 @@ namespace CodeGen.Services
                 TemplateDocument.Load(cfg, @"DataType\TargetStates.dt"), result, "(encapsulated target input)");
 
 
+        // ONE INPUT REPLACING A SET OF THEM, on a CAT's interface.
+        //
+        // Both interlock folds do the same six things in the same order — declare the struct, drop each
+        // scalar's declaration, its event With, its network pin and its connection, then add the struct's
+        // With, pin and connection. The order IS the artefact, so it is written once here rather than
+        // twice with the second copy free to drift.
+        readonly record struct StructFold(
+            string Var, string Type, string[] Replaces, string[] AnchorBefore, string PinX, string PinY);
+
+        // The declaration itself. RECONCILES: a var already there with the wrong shape is the archive's
+        // pre-fold one, and leaving it would declare a pin of a different type from the one wired to it.
+        static bool DeclareStruct(XElement? inputVars, XNamespace ns, StructFold fold, string projectNamespace)
+        {
+            if (inputVars == null) return false;
+            var existing = inputVars.Elements(ns + "VarDeclaration")
+                .FirstOrDefault(v => (string?)v.Attribute("Name") == fold.Var);
+            if (existing != null)
+            {
+                if ((string?)existing.Attribute("Type") == fold.Type && existing.Attribute("ArraySize") == null)
+                    return false;
+                existing.SetAttributeValue("Type", fold.Type);
+                existing.SetAttributeValue("Namespace", projectNamespace);
+                existing.Attribute("ArraySize")?.Remove();
+                return true;
+            }
+            var decl = new XElement(ns + "VarDeclaration",
+                new XAttribute("Name", fold.Var),
+                new XAttribute("Type", fold.Type),
+                new XAttribute("Namespace", projectNamespace));
+            // Anchored where the inputs it replaces were, so the interface keeps its reading order.
+            var anchor = inputVars.Elements(ns + "VarDeclaration")
+                .FirstOrDefault(v => fold.AnchorBefore.Contains((string?)v.Attribute("Name")));
+            if (anchor != null) anchor.AddBeforeSelf(decl); else inputVars.Add(decl);
+            return true;
+        }
+
+        // The composite side: the declaration, plus the event With, the network pin and the connection
+        // into the interlock FB that the folded inputs each had.
+        static bool FoldCompositeInput(XElement iface, XElement net, XNamespace ns,
+            StructFold fold, string interlockFbName, string projectNamespace)
+        {
+            var inputVars = iface.Element(ns + "InputVars");
+            // The event carrying the folded data — searched, not named: the centre-home CAT's is not INIT.
+            var carrier = iface.Element(ns + "EventInputs")?.Elements(ns + "Event")
+                .FirstOrDefault(e => e.Elements(ns + "With").Any(w =>
+                    fold.Replaces.Contains((string?)w.Attribute("Var")) ||
+                    (string?)w.Attribute("Var") == fold.Var))
+                ?? iface.Element(ns + "EventInputs")?.Elements(ns + "Event")
+                    .FirstOrDefault(e => (string?)e.Attribute("Name") == "INIT");
+            var dataConns = net.Element(ns + "DataConnections");
+
+            bool changed = DeclareStruct(inputVars, ns, fold, projectNamespace);
+            foreach (var a in fold.Replaces)
+            {
+                changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == a);
+                changed |= RemoveElems(carrier?.Elements(ns + "With"), w => (string?)w.Attribute("Var") == a);
+                changed |= RemoveElems(net.Elements(ns + "Input"), i => (string?)i.Attribute("Name") == a);
+                changed |= RemoveElems(dataConns?.Elements(ns + "Connection"), c => (string?)c.Attribute("Source") == a);
+            }
+            if (carrier != null && !carrier.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == fold.Var))
+            {
+                carrier.Add(new XElement(ns + "With", new XAttribute("Var", fold.Var)));
+                changed = true;
+            }
+            if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == fold.Var))
+            {
+                var pin = new XElement(ns + "Input",
+                    new XAttribute("Name", fold.Var),
+                    new XAttribute("x", fold.PinX), new XAttribute("y", fold.PinY),
+                    new XAttribute("Type", "Data"));
+                var last = net.Elements(ns + "Input").LastOrDefault();
+                if (last != null) last.AddAfterSelf(pin); else net.Add(pin);
+                changed = true;
+            }
+            if (dataConns != null && !dataConns.Elements(ns + "Connection")
+                    .Any(c => (string?)c.Attribute("Source") == fold.Var))
+            {
+                dataConns.Add(new XElement(ns + "Connection",
+                    new XAttribute("Source", fold.Var),
+                    new XAttribute("Destination", interlockFbName + "." + fold.Var)));
+                changed = true;
+            }
+            return changed;
+        }
+
         // Fold an actuator CAT's target InputVars into one Target : TargetStates, which is the shape the
         // evaluator takes and the shape the plan writes.
         internal static void NormalizeTargetStates(
@@ -45,58 +130,9 @@ namespace CodeGen.Services
                     result.Warnings.Add($"{catFileName}: missing InterfaceList/FBNetwork; Target normalize skipped.");
                     return;
                 }
-                var inputVars = iface.Element(ns + "InputVars");
-                var initEvent = iface.Element(ns + "EventInputs")?.Elements(ns + "Event")
-                    .FirstOrDefault(e => e.Elements(ns + "With").Any(w =>
-                        targetInputs.Contains((string?)w.Attribute("Var")) || (string?)w.Attribute("Var") == "Target"))
-                    ?? iface.Element(ns + "EventInputs")?.Elements(ns + "Event")
-                        .FirstOrDefault(e => (string?)e.Attribute("Name") == "INIT");
-                var dataConns = net.Element(ns + "DataConnections");
-                bool changed = false;
-
-                var tgtVar = inputVars?.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "Target");
-                if (tgtVar == null && inputVars != null)
-                {
-                    var t = new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                        new System.Xml.Linq.XAttribute("Name", "Target"),
-                        new System.Xml.Linq.XAttribute("Type", "TargetStates"),
-                        new System.Xml.Linq.XAttribute("Namespace", "Main"));
-                    var first = inputVars.Elements(ns + "VarDeclaration").FirstOrDefault(v => targetInputs.Contains((string?)v.Attribute("Name")));
-                    if (first != null) first.AddBeforeSelf(t); else inputVars.Add(t);
-                    changed = true;
-                }
-                foreach (var a in targetInputs)
-                {
-                    changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == a);
-                    changed |= RemoveElems(initEvent?.Elements(ns + "With"), w => (string?)w.Attribute("Var") == a);
-                    changed |= RemoveElems(net.Elements(ns + "Input"), i => (string?)i.Attribute("Name") == a);
-                    changed |= RemoveElems(dataConns?.Elements(ns + "Connection"), c => (string?)c.Attribute("Source") == a);
-                }
-                if (initEvent != null && !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "Target"))
-                {
-                    initEvent.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", "Target")));
-                    changed = true;
-                }
-                if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == "Target"))
-                {
-                    var pin = new System.Xml.Linq.XElement(ns + "Input",
-                        new System.Xml.Linq.XAttribute("Name", "Target"),
-                        new System.Xml.Linq.XAttribute("x", "1380"),
-                        new System.Xml.Linq.XAttribute("y", "2092"),
-                        new System.Xml.Linq.XAttribute("Type", "Data"));
-                    var lastInput = net.Elements(ns + "Input").LastOrDefault();
-                    if (lastInput != null) lastInput.AddAfterSelf(pin); else net.Add(pin);
-                    changed = true;
-                }
-                if (dataConns != null && !dataConns.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Source") == "Target"))
-                {
-                    dataConns.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                        new System.Xml.Linq.XAttribute("Source", "Target"),
-                        new System.Xml.Linq.XAttribute("Destination", interlockFbName + ".Target")));
-                    changed = true;
-                }
-            
-
+                bool changed = FoldCompositeInput(iface, net, ns,
+                    new StructFold("Target", "TargetStates", targetInputs, targetInputs, "1380", "2092"),
+                    interlockFbName, scope.ProjectNamespace);
 
                 if (changed)
                 {
@@ -123,19 +159,10 @@ namespace CodeGen.Services
                 var inputVars = iface.Element(ns + "InputVars");
                 var eventInputs = iface.Element(ns + "EventInputs");
                 var targetVars = TargetVarToField.Keys.ToArray();
-                bool changed = false;
 
-                var tgtVar = inputVars?.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "Target");
-                if (tgtVar == null && inputVars != null)
-                {
-                    var t = new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                        new System.Xml.Linq.XAttribute("Name", "Target"),
-                        new System.Xml.Linq.XAttribute("Type", "TargetStates"),
-                        new System.Xml.Linq.XAttribute("Namespace", "Main"));
-                    var first = inputVars.Elements(ns + "VarDeclaration").FirstOrDefault(v => targetVars.Contains((string?)v.Attribute("Name")));
-                    if (first != null) first.AddBeforeSelf(t); else inputVars.Add(t);
-                    changed = true;
-                }
+                bool changed = DeclareStruct(inputVars, ns,
+                    new StructFold("Target", "TargetStates", targetVars, targetVars, "0", "0"),
+                    scope.ProjectNamespace);
                 foreach (var a in targetVars)
                     changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == a);
                 foreach (var ev in eventInputs?.Elements(ns + "Event") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
@@ -183,6 +210,16 @@ namespace CodeGen.Services
             ["TargetHomeState"]  = "Home",
         };
 
+        // EVERY INTERLOCK INPUT A CAT INSTANCE CAN CARRY, both shapes.
+        //
+        // The fold is switchable, so an instance carries either the struct or the scalars it replaced,
+        // and the parity validator has to compare whichever is there. It used to restate all ten names
+        // for itself, beside the patcher that owns them - two lists to keep in step, and a renamed
+        // member would have gone unchecked in exactly the pass whose job is to catch a mismatch.
+        internal static IEnumerable<string> AllInterlockInputs =>
+            new[] { "RuleTable", "RuleCount", "Target" }
+                .Concat(RuleArrayNames).Concat(TargetVarToField.Keys);
+
         // Order matches struct field order.
         static readonly string[] RuleArrayNames =
             { "RuleFromState", "RuleToState", "RuleSourceID", "RuleBlockedState", "RuleTermCount" };
@@ -210,71 +247,12 @@ namespace CodeGen.Services
                     result.Warnings.Add($"{catFileName}: missing InterfaceList/FBNetwork; RuleTable normalize skipped.");
                     return;
                 }
-                var inputVars = iface.Element(ns + "InputVars");
-                // Find the event whose WITH carries the rule data — search, don't hardcode (Centre-Home differs from INIT).
-                var initEvent = iface.Element(ns + "EventInputs")?.Elements(ns + "Event")
-                    .FirstOrDefault(e => e.Elements(ns + "With").Any(w =>
-                        RuleArrayNames.Contains((string?)w.Attribute("Var"))
-                        || (string?)w.Attribute("Var") == "RuleTable"))
-                    ?? iface.Element(ns + "EventInputs")?.Elements(ns + "Event")
-                        .FirstOrDefault(e => (string?)e.Attribute("Name") == "INIT");
-                var dataConns = net.Element(ns + "DataConnections");
-
-                bool changed = false;
-                var scalarAndArrays = RuleArrayNames.Concat(new[] { "RuleCount" }).ToArray();
-
-                                    var rtVar = inputVars?.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "RuleTable");
-                    if (rtVar != null)
-                    {
-                        if ((string?)rtVar.Attribute("Type") != "InterlockTable" || rtVar.Attribute("ArraySize") != null)
-                        {
-                            rtVar.SetAttributeValue("Type", "InterlockTable");
-                            rtVar.SetAttributeValue("Namespace", "Main");
-                            rtVar.Attribute("ArraySize")?.Remove();
-                            changed = true;
-                        }
-                    }
-                    else if (inputVars != null)
-                    {
-                        var rt = new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                            new System.Xml.Linq.XAttribute("Name", "RuleTable"),
-                            new System.Xml.Linq.XAttribute("Type", "InterlockTable"),
-                            new System.Xml.Linq.XAttribute("Namespace", "Main"));
-                        var rc = inputVars.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "RuleCount");
-                        if (rc != null) rc.AddBeforeSelf(rt); else inputVars.Add(rt);
-                        changed = true;
-                    }
-                    foreach (var a in scalarAndArrays)
-                    {
-                        changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == a);
-                        changed |= RemoveElems(initEvent?.Elements(ns + "With"), w => (string?)w.Attribute("Var") == a);
-                        changed |= RemoveElems(net.Elements(ns + "Input"), i => (string?)i.Attribute("Name") == a);
-                        changed |= RemoveElems(dataConns?.Elements(ns + "Connection"), c => (string?)c.Attribute("Source") == a);
-                    }
-                    if (initEvent != null && !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "RuleTable"))
-                    {
-                        initEvent.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", "RuleTable")));
-                        changed = true;
-                    }
-                    if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == "RuleTable"))
-                    {
-                        var pin = new System.Xml.Linq.XElement(ns + "Input",
-                            new System.Xml.Linq.XAttribute("Name", "RuleTable"),
-                            new System.Xml.Linq.XAttribute("x", "1320"),
-                            new System.Xml.Linq.XAttribute("y", "1852"),
-                            new System.Xml.Linq.XAttribute("Type", "Data"));
-                        var lastInput = net.Elements(ns + "Input").LastOrDefault();
-                        if (lastInput != null) lastInput.AddAfterSelf(pin); else net.Add(pin);
-                        changed = true;
-                    }
-                    if (dataConns != null && !dataConns.Elements(ns + "Connection").Any(c => (string?)c.Attribute("Source") == "RuleTable"))
-                    {
-                        dataConns.Add(new System.Xml.Linq.XElement(ns + "Connection",
-                            new System.Xml.Linq.XAttribute("Source", "RuleTable"),
-                            new System.Xml.Linq.XAttribute("Destination", interlockFbName + ".RuleTable")));
-                        changed = true;
-                    }
-                
+                // RuleCount folds in with the arrays: the struct carries the count as a member.
+                bool changed = FoldCompositeInput(iface, net, ns,
+                    new StructFold("RuleTable", "InterlockTable",
+                        RuleArrayNames.Concat(new[] { "RuleCount" }).ToArray(), new[] { "RuleCount" },
+                        "1320", "1852"),
+                    interlockFbName, scope.ProjectNamespace);
 
                 if (changed)
                 {
@@ -306,27 +284,10 @@ namespace CodeGen.Services
                 bool changed = false;
                 var scalarAndArrays = RuleArrayNames.Concat(new[] { "RuleCount" }).ToArray();
 
-                                    var rtVar = inputVars?.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "RuleTable");
-                    if (rtVar != null)
-                    {
-                        if ((string?)rtVar.Attribute("Type") != "InterlockTable" || rtVar.Attribute("ArraySize") != null)
-                        {
-                            rtVar.SetAttributeValue("Type", "InterlockTable");
-                            rtVar.SetAttributeValue("Namespace", "Main");
-                            rtVar.Attribute("ArraySize")?.Remove();
-                            changed = true;
-                        }
-                    }
-                    else if (inputVars != null)
-                    {
-                        var rt = new System.Xml.Linq.XElement(ns + "VarDeclaration",
-                            new System.Xml.Linq.XAttribute("Name", "RuleTable"),
-                            new System.Xml.Linq.XAttribute("Type", "InterlockTable"),
-                            new System.Xml.Linq.XAttribute("Namespace", "Main"));
-                        var rc = inputVars.Elements(ns + "VarDeclaration").FirstOrDefault(v => (string?)v.Attribute("Name") == "RuleCount");
-                        if (rc != null) rc.AddBeforeSelf(rt); else inputVars.Add(rt);
-                        changed = true;
-                    }
+                changed |= DeclareStruct(inputVars, ns,
+                    new StructFold("RuleTable", "InterlockTable", scalarAndArrays,
+                        new[] { "RuleCount" }, "0", "0"),
+                    scope.ProjectNamespace);
                     foreach (var a in scalarAndArrays)
                         changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == a);
                     foreach (var ev in eventInputs?.Elements(ns + "Event") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
