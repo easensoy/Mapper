@@ -767,21 +767,26 @@ namespace CodeGen.Translation.Process.Recipes
                 // A producer's ENTRY phase. What that MEANS is a deployment decision - boot readiness, or
                 // an ordinary phase to be waited for - and the two drive the plant differently, so it is
                 // declared rather than assumed. An undeclared deployment is refused here.
-                if (ctx.Handoff.PeerEntryPhase == Configuration.PeerEntryPhaseMeaning.Undeclared)
+                // Asked PER EDGE, so one deployment can read one pair as boot readiness and another as
+                // a phase to wait for. A plant-wide value made the second unrepresentable.
+                var meaning = ctx.Handoff.MeaningFor(peer.Name, process.Name, refState.Name);
+                if (meaning == Configuration.PeerEntryPhaseMeaning.Undeclared)
                     throw Fail(process, state,
-                        $"condition '{cond.Name}' names the entry phase of '{peer.Name}', and this " +
-                        "deployment does not declare what a producer's entry phase means " +
-                        "(smc-rig.yml handoff.peerEntryPhase: readinessAssertion | runtimePhase). " +
-                        "Reading it as boot readiness and reading it as a runtime phase drive the plant " +
-                        "differently, so the compiler will not choose");
-                if (ctx.Handoff.PeerEntryPhase == Configuration.PeerEntryPhaseMeaning.ReadinessAssertion)
+                        $"condition '{cond.Name}' names the entry phase of '{peer.Name}', and no " +
+                        "smc-rig.yml handoff.peerEntryPhase row covers " +
+                        $"'{peer.Name}' -> '{process.Name}'. Reading it as boot readiness and reading it " +
+                        "as a runtime phase drive the plant differently, so the compiler will not choose. " +
+                        "Add a row naming this pair (or a catch-all row carrying only a meaning) with " +
+                        "readinessAssertion or runtimePhase");
+                if (meaning == Configuration.PeerEntryPhaseMeaning.ReadinessAssertion)
                 {
                     arrays.Warnings.Add(
                         $"'{process.Name}' state '{state.Name}': condition '{cond.Name}' names the peer's " +
                         "Initialisation state, treated as a readiness assertion rather than a runtime phase.");
                     Covered(GuardLeafOutcome.SatisfiedByDeclaration,
-                        "smc-rig.yml declares a producer's entry phase to be a boot-readiness assertion, " +
-                        "which the plant answers by having started");
+                        "smc-rig.yml declares this edge's producer entry phase to be a boot-readiness " +
+                        "assertion, which the plant answers by having started: " +
+                        (ctx.Handoff.ReasonFor(peer.Name, process.Name, refState.Name) ?? string.Empty).Trim());
                     return;
                 }
                 // runtimePhase: fall through and compile it like any other phase, which then needs a
@@ -850,7 +855,7 @@ namespace CodeGen.Translation.Process.Recipes
         // Cross-process conditions with each transport resolved. No cache, so nothing survives a generation.
         internal static ProcessHandoffPlan HandoffPlan(Ctx ctx) =>
             ProcessHandoffPlan.Derive(ctx.Twin, ctx.ProcessIdByName, ctx.Graphs,
-                (producer, consumer) => SameRing(producer, consumer, ctx), ctx.Manifest);
+                (producer, consumer) => SameRing(producer, consumer, ctx), ctx.Manifest, ctx.Handoff);
 
         private static void Serialize(VueOneComponent process, CodeGen.Domain.Twin.ProcessGraph graph,
             List<Row> rows, Dictionary<string, int> firstRow, RecipeArrays arrays)
