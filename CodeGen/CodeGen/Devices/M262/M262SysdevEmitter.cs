@@ -12,8 +12,7 @@ namespace CodeGen.Devices.M262
 {
     public static class M262SysdevEmitter
     {
-        const string LibElNs = CodeGen.Devices.Core.Station2DeviceEmitter.LibElNs;
-        static string ApplicationName => Configuration.GenerationConfig.Application;
+        const string LibElNs = CodeGen.Devices.Core.EaeDeviceWriter.LibElNs;
         // EVERY FACT ABOUT THE DEVICE COMES FROM THE DESCRIPTOR THIS EMITTER WAS GIVEN.
         //
         // These were statics keyed on the name "M262", so a second controller of this kind could only
@@ -65,7 +64,7 @@ namespace CodeGen.Devices.M262
                 ?? throw new InvalidOperationException(
                     "Cannot derive EAE project root: no .dfbproj above MapperConfig.SyslayPath2.");
 
-            AlignApplicationName(eaeRoot);
+            AlignApplicationName(eaeRoot, cfg.Generation.ApplicationName);
 
             // device.yml owns the resource name; reading it here is what keeps the sysdev, the .hcf
             // symlinks and the sysres mirror agreeing about what this resource is called.
@@ -108,7 +107,8 @@ namespace CodeGen.Devices.M262
             var syslayPath = cfg.Paths.ActiveSyslayPath;
             var fbInstances = string.IsNullOrWhiteSpace(syslayPath) || !File.Exists(syslayPath)
                 ? new List<SysresFbMirror.SyslayFb>()
-                : SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslayPath);
+                : SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslayPath,
+                    ctx.Cfg.Generation.ProjectNamespace);
 
             var sysresPath = EaeProjectLayout.FindSysresFor(sysdevPath);
 
@@ -165,10 +165,10 @@ namespace CodeGen.Devices.M262
             Directory.CreateDirectory(sysdevFolder);
 
             // The same EAE deploy plugin every target carries, so its file name has one owner.
-            var propsPath = Path.Combine(sysdevFolder, Station2DeviceEmitter.DeployPluginPropertiesFile(cfg));
+            var propsPath = Path.Combine(sysdevFolder, EaeDeviceWriter.DeployPluginPropertiesFile(cfg));
 
             // Byte-identical to the standard (non-Soft_dPAC) device properties every other PLC gets.
-            var canonical = Station2DeviceEmitter.BuildStandardDeployPluginPropertiesXml(cfg, enableInsecureApp);
+            var canonical = EaeDeviceWriter.BuildStandardDeployPluginPropertiesXml(cfg, enableInsecureApp);
 
             if (!File.Exists(propsPath) || File.ReadAllText(propsPath) != canonical)
                 File.WriteAllText(propsPath, canonical);
@@ -210,7 +210,7 @@ namespace CodeGen.Devices.M262
             var resourceId = self.Identity.Resource;
 
             var sysdevPath = Path.Combine(sysGuidDir, $"{sysdevId}.sysdev");
-            File.WriteAllText(sysdevPath, Station2DeviceEmitter.BuildSysdevXml(cfg,
+            File.WriteAllText(sysdevPath, EaeDeviceWriter.BuildSysdevXml(cfg,
                 sysdevId, DeviceName(self), self.DeviceType, resourceId, resourceName));
 
             var sysdevFolder = Path.Combine(sysGuidDir, sysdevId);
@@ -218,16 +218,16 @@ namespace CodeGen.Devices.M262
             var sysresPath = Path.Combine(sysdevFolder, $"{resourceId}.sysres");
             if (!File.Exists(sysresPath))
                 File.WriteAllText(sysresPath,
-                    Station2DeviceEmitter.BuildSysresXml(cfg, resourceId, resourceName));
+                    EaeDeviceWriter.BuildSysresXml(cfg, resourceId, resourceName));
 
             var e0601 = Path.Combine(sysdevFolder,
-                CodeGen.Devices.Core.Station2DeviceEmitter.SystemDevicePropertiesFile(cfg));
+                CodeGen.Devices.Core.EaeDeviceWriter.SystemDevicePropertiesFile(cfg));
             if (!File.Exists(e0601))
-                File.WriteAllText(e0601, Station2DeviceEmitter.BuildEmptySystemDeviceProps(cfg));
+                File.WriteAllText(e0601, EaeDeviceWriter.BuildEmptySystemDeviceProps(cfg));
 
             var simBind = Path.Combine(sysdevFolder, $"{sysdevId}.Simulation.Binding.xml");
             File.WriteAllText(simBind,
-                Station2DeviceEmitter.BuildSimulationBindingXml(cfg, sysdevId,
+                EaeDeviceWriter.BuildSimulationBindingXml(cfg, sysdevId,
                     self.SimulationDeployPort, self.SimulationArchivePort));
 
             return sysdevPath;
@@ -280,8 +280,8 @@ namespace CodeGen.Devices.M262
             doc.Save(sysdevPath);
         }
 
-        // Align every .sysapp root Application Name to ApplicationName (idempotent; app is keyed by ID).
-        static void AlignApplicationName(string eaeRoot)
+        // Align every .sysapp root Application Name to the one the run declares (idempotent; app is keyed by ID).
+        static void AlignApplicationName(string eaeRoot, string applicationName)
         {
             try
             {
@@ -294,8 +294,8 @@ namespace CodeGen.Devices.M262
                         var doc = XDocument.Load(sysapp, LoadOptions.PreserveWhitespace);
                         var root = doc.Root;
                         if (root == null) continue;
-                        if (string.Equals((string?)root.Attribute("Name"), ApplicationName, StringComparison.Ordinal)) continue;
-                        root.SetAttributeValue("Name", ApplicationName);
+                        if (string.Equals((string?)root.Attribute("Name"), applicationName, StringComparison.Ordinal)) continue;
+                        root.SetAttributeValue("Name", applicationName);
                         doc.Save(sysapp);
                     }
                     catch { /* best-effort per file */ }
