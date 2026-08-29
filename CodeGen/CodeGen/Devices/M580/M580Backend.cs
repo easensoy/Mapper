@@ -9,14 +9,12 @@ namespace CodeGen.Devices.M580
     // The M580 dPAC: the assembly side's controller.
     public sealed class M580Backend : TargetBackend
     {
-        // The target this instance emits, handed in by the composition root from the row that
-        // declared it. A second controller of this kind is another row, not another class.
-        public override PlcAssignment Target { get; }
-
-        public M580Backend(PlcAssignment target) => Target = target;
+        // The row this instance emits, handed in by the composition root. A second controller of
+        // this kind is another row, not another class.
+        public M580Backend(Mapping.TargetDescriptor descriptor) : base(descriptor) { }
 
         public override void EmitDevice(GenerationContext ctx, DeviceScope scope, Action<string> log) =>
-            Stage("device emit", log, () => Report(Station2DeviceEmitter.EmitM580(ctx.Cfg, Target, scope), log));
+            Stage("device emit", log, () => Report(M580DeviceRenderer.EmitM580(ctx.Cfg, Target, scope), log));
 
         // The authored .hcf carried verbatim and re-rooted with the resource id, so it refills after a wipe.
         public override void CopyHardwareConfig(GenerationContext ctx, Action<string> log) =>
@@ -38,7 +36,7 @@ namespace CodeGen.Devices.M580
             SystemInjector.BindingApplicationReport report, Action<string> log) =>
             Stage("hcf bind", log, () => M580SymbolBinder.BindM580(ctx.Cfg, Target, report));
 
-        internal static void Report(Station2DeviceEmitter.EmitResult result, Action<string> log)
+        internal static void Report(EaeDeviceWriter.EmitResult result, Action<string> log)
         {
             foreach (var f in result.FilesWritten) log($"[Stn2]   {f}");
             foreach (var w in result.Warnings) log($"[Stn2][Warn] {w}");
