@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Control Type="System">
+  <s>
+    <n>PartiallyCorruptPlant</n>
+    <SystemID>SYS-corrupt</SystemID>
+    <Component>
+      <n>Charge_Ram</n>
+      <ComponentID>C-ram</ComponentID>
+      <Type>Actuator</Type>
+      <State><n>Home</n><StateID>S-ram-0</StateID><State_Number>0</State_Number><Initial_State>true</Initial_State><StaticState>true</StaticState></State>
+    </Component>
+    <Component>
+      <n>No_Id_Here</n>
+      <Type>Actuator</Type>
+      <State><n>Home</n><StateID>S-x-0</StateID><State_Number>0</State_Number><StaticState>true</StaticState></State>
+    </Component>
+    <Component>
+      <ComponentID>C-nameless</ComponentID>
+      <Type>Sensor</Type>
+      <State><n>Off</n><StateID>S-n-0</StateID><State_Number>0</State_Number><StaticState>true</StaticState></State>
+    </Component>
+  </s>
+</Control>
