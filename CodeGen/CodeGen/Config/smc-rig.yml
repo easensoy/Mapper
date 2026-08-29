@@ -89,8 +89,9 @@ m580Channels:
 # The swivel's channels depend on which CAT the twin's own state graph selected for it, so they are
 # declared per CAT shape and resolved per generation. An empty port means the physical channel has no
 # counterpart on that CAT and is BLANKED -- a dangling symbolic fails the EAE compile.
-# ⚠ COIL DIRECTION (Left = Work1/Pick, Right = Work2/Place) IS ASSUMED, NOT VERIFIED. Confirm on the rig
-# before motion -- Docs/REVERTED_FIXES.md R-12.
+# ⚠ The coil direction these two rows encode is ASSUMED. It is declared as an unresolved physical fact
+# at the end of this file, so every generation reports it rather than leaving it in a comment nobody
+# generating a project ever reads.
 swivelChannels:
   # Centre-home: Home + Work1 + Work2 are three distinct physical stops. atWork2 keeps its CAPITAL W to
   # match the CAT's own '$${PATH}atWork2' symlink. Home closes via No_Sensor_Handler_7SCH.
@@ -127,12 +128,22 @@ roles:
 # each reading drives the plant differently, so picking one silently is the difference between the gate
 # the twin asked for and no gate at all.
 handoff:
-  # A reference to a producer's ENTRY phase. On this rig every process announces its entry once per
-  # cycle as a boot-readiness assertion: the consumer is telling the model "that station exists and has
-  # started", not "that station finished a work phase". So it is answered by the plant having started
-  # rather than by a runtime wait. Set runtimePhase to make it an ordinary phase instead, which then
-  # needs a transport that carries it - and is refused where none exists.
-  peerEntryPhase: readinessAssertion
+  # A reference to a producer's ENTRY phase, read PER EDGE. Each row names the producer, the consumer
+  # and (optionally) the producer state it covers; an omitted field means ANY, so a row carrying only a
+  # meaning is the plant-wide reading. The most specific matching row wins, and two equally specific
+  # rows that could both match are refused - so the answer never depends on the order they are written.
+  #
+  # This was one plant-wide value. A deployment can legitimately hold both readings at once, and the
+  # single value made the second unrepresentable: an edge that genuinely needed a runtime wait compiled
+  # to no wait at all, was recorded as covered-by-declaration, and shipped.
+  peerEntryPhase:
+    - meaning: readinessAssertion
+      because: >
+        On this rig every process announces its entry once per cycle as a boot-readiness assertion:
+        a consumer naming it is telling the model "that station exists and has started", not "that
+        station finished a work phase". So it is answered by the plant having started rather than by a
+        runtime wait. Add a row above this one - naming a producer and consumer - to read one edge as
+        runtimePhase instead; that edge then needs a transport that carries it, and is refused if none does.
 
   # A material carrier may stand in for a producer's phase ONLY where a row here says the two
   # propositions coincide on this plant. A carrier reports that material arrived; a phase reports that a
@@ -169,3 +180,24 @@ execution:
     steps:
       - { command: 1, settled: 2 }
       - { command: 3, settled: 0 }
+
+
+# PHYSICAL FACTS THIS PROFILE ASSUMES AND HAS NOT VERIFIED.
+#
+# Control.xml describes control semantics. It says nothing about which solenoid moves an arm which way,
+# how a sensor is wired, or what a coupler does with its outputs on a fault - and the compiler cannot
+# find out. Where this profile has had to assume one, it is declared HERE and printed on every run.
+#
+# Each row must say what is assumed, what happens if it is wrong, and how to settle it. A row missing
+# the risk or the verification is refused: an assumption nobody assessed is what a comment already was.
+unresolvedPhysicalFacts:
+  - fact: >
+      Swivel coil direction: Swivel_Arm_Left_Q drives Bearing_PnP toward work1 and Swivel_Arm_Right_Q
+      toward work2, as the m580Channels and swivelChannels rows above encode.
+    risk: >
+      If the two coils are wired the other way round, a command to work1 drives the arm toward work2
+      instead - into the shaft side - and the first motion of a cycle is a collision.
+    verifyBy: >
+      With the shaft side parked and clear, energise each coil on its own and observe which way the arm
+      moves. Correct the two channel rows above if they are the wrong way round.
+    reference: Docs/REVERTED_FIXES.md R-12
