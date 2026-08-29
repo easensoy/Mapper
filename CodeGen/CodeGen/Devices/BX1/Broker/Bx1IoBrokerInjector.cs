@@ -11,7 +11,7 @@ namespace CodeGen.Devices.BX1
     // BX1 cover-I/O broker injection. Broker id F6C04A4BA6FA8593 must stay the id the copied BX1 .hcf binds to.
     public static class Bx1IoBrokerInjector
     {
-        static readonly XNamespace Ns = CodeGen.Devices.Core.Station2DeviceEmitter.LibElNs;
+        static readonly XNamespace Ns = CodeGen.Devices.Core.EaeDeviceWriter.LibElNs;
 
         // The broker instance's frozen EAE id, read from the descriptor of the target that hosts it:
         // keyed on the name "BX1" a second coupler-bearing device could only reuse the first one's id.
@@ -110,7 +110,7 @@ namespace CodeGen.Devices.BX1
                     new XAttribute("ID", nextId++), new XAttribute("UID", uid++),
                     new XAttribute("Name", name), new XAttribute("Type", type),
                     new XAttribute("x", x.ToString()), new XAttribute("y", y.ToString()),
-                    new XAttribute("Namespace", Configuration.GenerationConfig.Namespace),
+                    new XAttribute("Namespace", cfg.Generation.ProjectNamespace),
                     new XElement("Attribute",
                         new XAttribute("Name", "Configuration.GenericFBType.InterfaceParams"),
                         new XAttribute("Value", Iface(arity))),
@@ -233,9 +233,9 @@ namespace CodeGen.Devices.BX1
 
             var fb = new XElement("FB",
                 new XAttribute("ID", nextId++), new XAttribute("Name", "CoverFailsafe"),
-                new XAttribute("Type", "Bx1CoverFailsafe"),
+                new XAttribute("Type", cfg.Manifest.ForInfraRole("coverSafeStartGate").Name),
                 new XAttribute("x", "4600"), new XAttribute("y", "1300"),
-                new XAttribute("Namespace", Configuration.GenerationConfig.Namespace));
+                new XAttribute("Namespace", cfg.Generation.ProjectNamespace));
             var firstInput = net.Elements("Input").FirstOrDefault();
             if (firstInput != null) firstInput.AddBeforeSelf(fb); else net.Add(fb);
 
@@ -399,7 +399,8 @@ namespace CodeGen.Devices.BX1
             var dc = net.Element(Ns + "DataConnections")  ?? AddSection(net, "DataConnections");
 
             // The broker FB (forced id so the copied .hcf matches).
-            AddBrokerFbIfAbsent(net, BrokerFbIdOf(cfg, target), isSysres, isSysres ? 9500 : 32000, 5800);
+            AddBrokerFbIfAbsent(net, BrokerFbIdOf(cfg, target), isSysres, isSysres ? 9500 : 32000, 5800,
+                cfg.Generation.ProjectNamespace);
             if (hasGripper)
                 AddEvent(ec, $"{InitRootCover(cfg)}.INITO", $"{BrokerFbName}.INIT");
 
@@ -440,12 +441,13 @@ namespace CodeGen.Devices.BX1
 
         // The broker instance itself. It carries no symlink names and no interface arity: the bridge that
         // needed those now lives inside PLC_RW_BX1.
-        static void AddBrokerFbIfAbsent(XElement net, string brokerFbId, bool isSysres, int x, int y)
+        static void AddBrokerFbIfAbsent(XElement net, string brokerFbId, bool isSysres, int x, int y,
+            string projectNamespace)
         {
             if (net.Elements(Ns + "FB").Any(f => (string?)f.Attribute("Name") == BrokerFbName)) return;
             var fb = new XElement(Ns + "FB",
                 new XAttribute("ID", brokerFbId), new XAttribute("Name", BrokerFbName),
-                new XAttribute("Type", BrokerFbType), new XAttribute("Namespace", Configuration.GenerationConfig.Namespace));
+                new XAttribute("Type", BrokerFbType), new XAttribute("Namespace", projectNamespace));
             if (isSysres) fb.Add(new XAttribute("Mapping", brokerFbId));
             fb.Add(new XAttribute("x", x.ToString()), new XAttribute("y", y.ToString()));
 
