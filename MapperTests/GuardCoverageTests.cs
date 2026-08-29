@@ -171,8 +171,10 @@ namespace MapperTests
         {
             // Undeclared is refused, so the shipped profile has to say. Reading it as boot readiness and
             // reading it as a runtime phase drive the plant differently.
+            // Asked the way the compiler asks it: for an edge. A catch-all row answers every pair.
             Assert.NotEqual(PeerEntryPhaseMeaning.Undeclared,
-                PlantFacts.Declared(TestConfig.Cfg.Rig).Handoff.PeerEntryPhase);
+                PlantFacts.Declared(TestConfig.Cfg.Rig).Handoff
+                    .MeaningFor("Any_Producer", "Any_Consumer", "Entry"));
         }
 
         [Fact]
@@ -204,7 +206,7 @@ namespace MapperTests
 
             var silent = PlantFacts.Declared(TestConfig.Cfg.Rig) with
             {
-                Handoff = new HandoffPolicy { PeerEntryPhase = PeerEntryPhaseMeaning.Undeclared },
+                Handoff = new HandoffPolicy(),   // no rows: no edge is covered
             };
             var ex = Assert.Throws<InvalidOperationException>(() => GenerationContext.Plan(
                 TestConfig.Cfg, new List<VueOneComponent> { producer, consumer, a, b },
@@ -230,7 +232,10 @@ namespace MapperTests
                 CarrierSegment = Array.Empty<string>(),
                 Handoff = new HandoffPolicy
                 {
-                    PeerEntryPhase = PeerEntryPhaseMeaning.RuntimePhase,
+                    PeerEntryPhase = new List<PeerEntryPhaseRule>
+                    {
+                        new() { Meaning = PeerEntryPhaseMeaning.RuntimePhase, Because = "test" },
+                    },
                     Carriers = new List<CarrierSubstitution>(),
                 },
             };
