@@ -31,15 +31,6 @@
         // The IEC 61499 spelling of a duration. Grammar, so it stays in code; the NUMBER is declared.
         public static string Duration(int ms) => $"T#{ms}ms";
 
-        // The one spelling of the project namespace, so the two dozen places that stamp a Namespace
-        // attribute cannot disagree about which project they are emitting into.
-        public static string Namespace => Current.ProjectNamespace;
-
-        // The one spelling of each, for the same reason: an emitter that writes one of these names and
-        // a wiper that blanks it are describing the same artefact.
-        public static string Application => Current.ApplicationName;
-        public static string Layer       => Current.LayerName;
-
         // Refused at load: a value this file does not declare is not a zero, it is a missing fact,
         // and every one of these decides something about the emitted project.
         private static void Validate(GenerationConfig c)
