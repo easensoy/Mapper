@@ -50,7 +50,7 @@ namespace MapperTests
             };
         }
 
-        private static TwinModel Twin(params VueOneComponent[] cs) => TwinModel.Build(cs);
+        private static TwinModel Twin(params VueOneComponent[] cs) => TwinModel.Build(cs, TestConfig.Cfg.Twin);
 
 
         private static PlcAssignment Placed(IReadOnlyDictionary<string, PlcAssignment> g, string name) =>
