@@ -44,8 +44,16 @@ namespace CodeGen.Application
         // run drives them are all declared in device.yml - so a second controller of a kind that
         // already has a backend is a row in that file and no change here at all. Genuinely new
         // hardware earns one entry.
-        private static readonly IReadOnlyDictionary<string, Func<PlcAssignment, CodeGen.Devices.ITargetBackend>>
-            BackendKinds = new Dictionary<string, Func<PlcAssignment, CodeGen.Devices.ITargetBackend>>(
+        /// A backend KIND and the code that implements it. THE one registry: `device.yml` resolves a
+        /// target's `backendKind` through this table and nothing else, so a kind nothing implements is
+        /// refused by name rather than silently emitting no device.
+        ///
+        /// It is a table rather than a reflection scan on purpose. A scan would find a backend that was
+        /// never meant to ship, would fail differently depending on which assemblies happened to load,
+        /// and would give no place to say what a kind IS - and none of that buys anything a dictionary
+        /// entry does not.
+        public static readonly IReadOnlyDictionary<string, Func<CodeGen.Mapping.TargetDescriptor, CodeGen.Devices.ITargetBackend>>
+            BackendKinds = new Dictionary<string, Func<CodeGen.Mapping.TargetDescriptor, CodeGen.Devices.ITargetBackend>>(
                 StringComparer.OrdinalIgnoreCase)
             {
                 ["M262"] = t => new CodeGen.Devices.M262.M262Backend(t),
@@ -61,17 +69,22 @@ namespace CodeGen.Application
         // The declarations are the RUN'S OWN snapshot, never a process-wide one. Two runs holding
         // different bundles must compose different backend sets; reading a singleton here handed the
         // second run the first run's targets while every other stage used its own.
-        public static CodeGen.Devices.ITargetBackend[] Backends(Configuration.CompilerConfiguration cfg)
+        /// kinds names the implementations to resolve against; null is the shipped table. A test that
+        /// proves the boundary passes its own - the SAME mechanism a real backend is registered by, so
+        /// what it exercises is the production path and not a private copy of it.
+        public static CodeGen.Devices.ITargetBackend[] Backends(Configuration.CompilerConfiguration cfg,
+            IReadOnlyDictionary<string, Func<CodeGen.Mapping.TargetDescriptor, CodeGen.Devices.ITargetBackend>>? kinds = null)
         {
+            var implemented = kinds ?? BackendKinds;
             var declared = (cfg ?? throw new ArgumentNullException(nameof(cfg))).Devices;
             var byPlc = declared.Targets.ToDictionary(t => t.Plc);
             var order = declared.BackendEmitOrder;
 
             var errors = new List<string>();
             foreach (var t in declared.Targets)
-                if (!BackendKinds.ContainsKey(t.BackendKind ?? string.Empty))
+                if (!implemented.ContainsKey(t.BackendKind ?? string.Empty))
                     errors.Add($"target '{t.Plc}' declares backendKind '{t.BackendKind}', which no backend " +
-                               $"implements. Implemented kinds: {string.Join(", ", BackendKinds.Keys)}");
+                               $"implements. Implemented kinds: {string.Join(", ", implemented.Keys)}");
             foreach (var plc in order)
                 if (!byPlc.ContainsKey(plc))
                     errors.Add($"backendEmitOrder names '{plc}', which device.yml declares no target for");
@@ -85,7 +98,33 @@ namespace CodeGen.Application
                     "device.yml backend declarations are inconsistent:" + Environment.NewLine +
                     "  - " + string.Join(Environment.NewLine + "  - ", errors));
 
-            return order.Select(plc => BackendKinds[byPlc[plc].BackendKind](plc)).ToArray();
+            // Each backend is handed its RESOLVED row, not a name to look up again per stage.
+            return order.Select(plc => implemented[byPlc[plc].BackendKind](cfg.Targets.Of(plc))).ToArray();
+        }
+
+        // Printed on EVERY generation, not just a failing one: an unverified physical assumption is
+        // not an error - the project is correct GIVEN it - which is exactly why it needs saying out
+        // loud. The predecessor was a comment in smc-rig.yml, discarded at parse.
+        internal static void ReportUnresolvedPhysicalFacts(
+            Configuration.CompilerConfiguration cfg, Action<string> log)
+        {
+            var facts = cfg.Rig.UnresolvedPhysicalFacts;
+            if (facts.Count == 0) return;
+
+            static string OneLine(string s) =>
+                string.Join(' ', (s ?? string.Empty).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
+            log($"[Unverified] {facts.Count} PHYSICAL ASSUMPTION(S) THIS PROFILE HAS NOT VERIFIED. " +
+                "The generated project is correct given them; the plant is only correct if they hold.");
+            for (int i = 0; i < facts.Count; i++)
+            {
+                var f = facts[i];
+                log($"[Unverified]   {i + 1}. {OneLine(f.Fact)}");
+                log($"[Unverified]      IF WRONG: {OneLine(f.Risk)}");
+                log($"[Unverified]      VERIFY  : {OneLine(f.VerifyBy)}");
+                if (!string.IsNullOrWhiteSpace(f.Reference))
+                    log($"[Unverified]      SEE     : {f.Reference.Trim()}");
+            }
         }
 
         public static GenerationResult Execute(GenerationRequest request, Action<string> log)
@@ -96,7 +135,7 @@ namespace CodeGen.Application
             // ONE SESSION for this run: the declarations, the plan and the backends that will emit
             // it, decided here and handed down. Nothing below reaches a global for any of them.
             var declarations = Configuration.CompilerConfiguration.Load(request.Config.Clone());
-            var session = CompilerSession.Begin(declarations, Backends(declarations));
+            var session = CompilerSession.Begin(declarations);
 
             // Work on a copy: MapperUI keeps one config for the process lifetime, so mutation leaks between runs.
             // THE CONFIGURATION COMPOSITION ROOT. Every declaration file is read ONCE, here, and one
@@ -112,6 +151,12 @@ namespace CodeGen.Application
             session = session.With(txn.Configuration);
             var cfg = session.Cfg;
 
+            // WHAT THIS PROFILE ASSUMES AND HAS NOT VERIFIED, said before anything is written.
+            // These are physical facts Control.xml cannot carry and the compiler cannot discover, so
+            // the profile had to assume them. Each one is a standing risk on the rig, and the operator
+            // has to see it on the run that produces the project rather than in a file comment.
+            ReportUnresolvedPhysicalFacts(cfg, log);
+
             // THE BOUNDARY. The request carries the selection the UI and the VueOne runner have always
             // sent - a set of component names bound for the relocation target. It becomes a generic
             // component -> target assignment here, and nothing below this line names a controller.
@@ -120,7 +165,7 @@ namespace CodeGen.Application
             // THE MODEL, RESOLVED ONCE. The composition root reads it and hands the same IR to the
             // capability report and to planning, so the two cannot describe different twins.
             var twin = Domain.Twin.TwinModel.Build(
-                new CodeGen.IO.SystemXmlReader().ReadAllComponents(request.ControlXmlPath));
+                new CodeGen.IO.SystemXmlReader(cfg.Twin).ReadAllComponents(request.ControlXmlPath), cfg.Twin);
 
             // WHAT THIS COMPILER CAN DO WITH THIS MODEL, answered before planning starts. The refusals
             // downstream still stand; this reports ALL of them at once and says of each whether it is
@@ -386,12 +431,6 @@ namespace CodeGen.Application
         {
             foreach (var (comp, detail) in report.Bound) log($"[IoBindings] {comp} bound: {detail}");
             foreach (var line in report.Missing) log($"[IoBindings] {line}");
-            if (report.Bound.Count > 0)
-            {
-                log("[IoBindings] Symlink override via nested FB is invalid IEC 61499; PLC_RW_M262 variables must be renamed to match $${PATH} expansion: " +
-                    "PusherAtHome to Pusher.athome, PusherAtWork to Pusher.atwork, ExtendPusher to Pusher.OutputToWork, Hopper to PartInHopper.Input. " +
-                    "This is a one-time manual edit in PLC_RW_M262.fbt and is not Mapper's job.");
-            }
         }
 
         static void LogNew(SystemInjector.BindingApplicationReport report, int fromIndex,
@@ -411,7 +450,7 @@ namespace CodeGen.Application
             // creates has to come after it, and that order is declared there rather than written here.
             var scope = DeviceScope.Open(cfg);
             foreach (var backend in session.Backends) backend.EmitDevice(ctx, scope, log);
-            foreach (var w in Station2DeviceEmitter.StripStaleSysresEntries(scope.EaeRoot).Warnings)
+            foreach (var w in EaeDeviceWriter.StripStaleSysresEntries(scope.EaeRoot).Warnings)
                 log($"[Device][Warn] {w}");
 
             // EAE's own Clean does not flush its per-device cache; run early so later emitters write clean.
@@ -463,7 +502,7 @@ namespace CodeGen.Application
             }
             catch (Exception ex) { StageFailed("dfbproj: stale sysres-stem sweep", StageKind.Required, ex, log); }
 
-            // Runs AFTER Station2DeviceEmitter so the Equipment UUIDs the wires reference are on disk.
+            // Runs AFTER EaeDeviceWriter so the Equipment UUIDs the wires reference are on disk.
             try
             {
                 var net = TopologyNetworkEmitter.Emit(ctx);
