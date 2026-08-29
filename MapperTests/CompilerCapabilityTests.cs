@@ -76,7 +76,7 @@ namespace MapperTests
         static CompilerCapabilityReport Report(IEnumerable<VueOneComponent> components,
             CompilerConfiguration? cfg = null, IEnumerable<PlcAssignment>? backends = null) =>
             CompilerCapabilityReport.For(
-                TwinModel.Build(components.ToList()), cfg ?? TestConfig.Cfg, backends ?? AllTargets);
+                TwinModel.Build(components.ToList(), TestConfig.Cfg.Twin), cfg ?? TestConfig.Cfg, backends ?? AllTargets);
 
         // ---- the four answers -------------------------------------------------------------------
 
@@ -202,7 +202,7 @@ namespace MapperTests
             // report is a second opinion rather than a summary of the one the compiler holds.
             foreach (var suffix in new[] { "_sw5", "_sw5_noclamp" })
             {
-                var components = new CodeGen.IO.SystemXmlReader()
+                var components = new CodeGen.IO.SystemXmlReader(TestConfig.Cfg.Twin)
                     .ReadAllComponents(TestTwin.CompilableFixturePath(suffix));
                 var report = Report(components);
                 Assert.True(report.CanCompile,
