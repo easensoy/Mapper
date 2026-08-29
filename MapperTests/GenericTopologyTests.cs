@@ -95,9 +95,9 @@ namespace MapperTests
 
         private static ReportGraph Build(params VueOneComponent[] components)
         {
-            var twin = TwinModel.Build(components);
+            var twin = TwinModel.Build(components, TestConfig.Cfg.Twin);
             return ReportGraph.Build(twin, Allocation(twin),
-                RigCatalog.Current.CrossRingSegment, Array.Empty<string>(), Graphs(twin), TestConfig.Cfg.Targets);
+                RigCatalog.Current.CrossRingSegment, Graphs(twin), TestConfig.Cfg.Targets);
         }
 
         // Roster rows on two targets that each run a process. Which target is which is not the point.
