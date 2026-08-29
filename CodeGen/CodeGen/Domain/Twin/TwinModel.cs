@@ -119,9 +119,27 @@ namespace CodeGen.Domain.Twin
         private static string Describe(VueOneCondition c) =>
             string.IsNullOrWhiteSpace(c.Name) ? string.Empty : $" (\"{c.Name}\")";
 
-        public static TwinModel Build(IReadOnlyList<VueOneComponent> components)
+        // schema resolves any component whose kind the reader did not stamp - a twin built in code.
+        // Passing the run's OWN schema is what stops a test twin being classified by a declaration
+        // some other run loaded.
+        public static TwinModel Build(IReadOnlyList<VueOneComponent> components,
+                                      Configuration.TwinSchema schema)
         {
             if (components == null) throw new ArgumentNullException(nameof(components));
+            if (schema == null) throw new ArgumentNullException(nameof(schema));
+
+            foreach (var c in components)
+                c.Kind ??= schema.KindOf(c.Type, c.Name);
+
+            // An empty model is not a small model. Every refusal below is about a component being
+            // WRONG; none of them fires when there is nothing to be wrong, so an unreadable twin used
+            // to plan cleanly, generate an empty application and report success.
+            if (components.Count == 0)
+                throw new InvalidOperationException(
+                    "[Twin] Control.xml declares no control components. Either the file describes " +
+                    "nothing this compiler can drive, or every component in it is a kind " +
+                    "Config/twin-schema.yml maps to 'excluded'. Generation stops rather than " +
+                    "publishing an empty project.");
 
             var problems = new List<string>();
             var byId = new Dictionary<string, TwinComponent>(StringComparer.OrdinalIgnoreCase);
@@ -172,10 +190,14 @@ namespace CodeGen.Domain.Twin
         public string Type { get; }
         public IReadOnlyList<TwinState> States { get; }
 
-        public bool IsProcess => string.Equals(Type, "Process", StringComparison.OrdinalIgnoreCase);
-        public bool IsSensor => string.Equals(Type, "Sensor", StringComparison.OrdinalIgnoreCase);
-        // Robots included: which CAT renders one is a generation decision, not a model fact.
-        public bool IsActuator => !IsProcess && !IsSensor;
+        // The kind the READER resolved from Config/twin-schema.yml. Asked, never re-derived: the
+        // predecessor read the token again here and answered `!IsProcess && !IsSensor`, so this IR
+        // and the interlock encoder (which compared Type == "Actuator") disagreed about a Robot.
+        // Non-null by construction: Build stamps every component before any TwinComponent exists.
+        public ComponentKind Kind => Source.Kind!.Value;
+        public bool IsProcess  => Kind == ComponentKind.Process;
+        public bool IsSensor   => Kind == ComponentKind.Sensor;
+        public bool IsActuator => Kind == ComponentKind.Actuator;
 
         private TwinComponent(VueOneComponent source, IReadOnlyList<TwinState> states,
                               Dictionary<string, TwinState> byStateId,
