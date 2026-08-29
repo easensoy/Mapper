@@ -15,7 +15,7 @@ namespace CodeGen.Services
         // own type and the composite that wraps it - must declare it identically, or the composite's
         // parameter would name a pin of a different shape.
         static bool EnsureRecipeVar(System.Xml.Linq.XElement? inputVars,
-            System.Xml.Linq.XNamespace ns, string size)
+            System.Xml.Linq.XNamespace ns, string size, string projectNamespace)
         {
             if (inputVars == null) return false;
             var existing = inputVars.Elements(ns + "VarDeclaration")
@@ -34,7 +34,7 @@ namespace CodeGen.Services
                 new System.Xml.Linq.XAttribute("Name", "Recipe"),
                 new System.Xml.Linq.XAttribute("Type", "RecipeStep"),
                 new System.Xml.Linq.XAttribute("ArraySize", size),
-                new System.Xml.Linq.XAttribute("Namespace", Configuration.GenerationConfig.Namespace)));
+                new System.Xml.Linq.XAttribute("Namespace", projectNamespace)));
             return true;
         }
 
@@ -299,7 +299,7 @@ namespace CodeGen.Services
                         changed |= RemoveElems(net.Elements(ns + "Input"), i => (string?)i.Attribute("Name") == nm);
                         changed |= RemoveElems(dataConns?.Elements(ns + "Connection"), c => (string?)c.Attribute("Source") == nm);
                     }
-                    changed |= EnsureRecipeVar(inputVars, ns, size);
+                    changed |= EnsureRecipeVar(inputVars, ns, size, scope.ProjectNamespace);
                     if (initEvent != null && !initEvent.Elements(ns + "With").Any(w => (string?)w.Attribute("Var") == "Recipe"))
                     { initEvent.Add(new System.Xml.Linq.XElement(ns + "With", new System.Xml.Linq.XAttribute("Var", "Recipe"))); changed = true; }
                     if (!net.Elements(ns + "Input").Any(i => (string?)i.Attribute("Name") == "Recipe"))
@@ -352,7 +352,7 @@ namespace CodeGen.Services
 
                                     foreach (var (nm, _) in RecipeArrays)
                         changed |= RemoveElems(inputVars?.Elements(ns + "VarDeclaration"), v => (string?)v.Attribute("Name") == nm);
-                    changed |= EnsureRecipeVar(inputVars, ns, size);
+                    changed |= EnsureRecipeVar(inputVars, ns, size, scope.ProjectNamespace);
                     foreach (var ev in eventInputs?.Elements(ns + "Event") ?? Enumerable.Empty<System.Xml.Linq.XElement>())
                     {
                         if (!ev.Elements(ns + "With").Any(w => RecipeArrays.Any(a => a.Name == (string?)w.Attribute("Var")))) continue;
@@ -399,7 +399,7 @@ namespace CodeGen.Services
             // The namespace comes from the declaration, not a second spelling of it: a pattern pinned
             // to "Main" would silently match nothing if the project were emitted into another one,
             // and this patch would then leave every state_table at the archive's capacity.
-            var ns = System.Text.RegularExpressions.Regex.Escape(Configuration.GenerationConfig.Namespace);
+            var ns = System.Text.RegularExpressions.Regex.Escape(scope.ProjectNamespace);
             var decl = new System.Text.RegularExpressions.Regex(
                 @"(<VarDeclaration Name=""state_table"" Type=""Component_State"" Namespace=""" +
                 ns + @""" ArraySize="")(\d+)("")");
