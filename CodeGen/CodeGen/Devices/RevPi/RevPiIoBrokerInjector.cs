@@ -77,7 +77,8 @@ namespace CodeGen.Devices.RevPi
 
         // Called by the deployer once the pristine coupler type is in place, so the resource holds only the broker.
         public static void EmbedBridgeInComposite(CompilerConfiguration cfg, PlcAssignment target, string fbtPath) =>
-            EmbedBridge(Resolve(cfg), cfg.Targets.Of(target).ResourceName, fbtPath);
+            EmbedBridge(Resolve(cfg), cfg.Targets.Of(target).ResourceName, fbtPath,
+                cfg.Generation.ProjectNamespace);
 
         internal static Coupler Resolve(CompilerConfiguration cfg) =>
             Resolve(cfg.Paths.TemplateLibraryPath, cfg.Paths.IoBindingsPath);
@@ -206,7 +207,7 @@ namespace CodeGen.Devices.RevPi
 
         // Only the resource copy carries the Mapping; an unmapped resource FB is the orphan EAE offers to repair.
         internal static bool PlaceBroker(Coupler coupler, PlcAssignment target, string path, bool isResource,
-            IReadOnlyList<string> hosted, LayoutCatalog layout, string bootFb)
+            IReadOnlyList<string> hosted, LayoutCatalog layout, string bootFb, string projectNamespace)
         {
             if (!File.Exists(path)) return false;
             var doc = XDocument.Load(path, LoadOptions.PreserveWhitespace);
@@ -229,7 +230,7 @@ namespace CodeGen.Devices.RevPi
             var band = layout.Band(target);
             var fb = new XElement(N("FB"),
                 new XAttribute("ID", coupler.BrokerFbId), new XAttribute("Name", BrokerName),
-                new XAttribute("Type", BrokerType), new XAttribute("Namespace", Configuration.GenerationConfig.Namespace));
+                new XAttribute("Type", BrokerType), new XAttribute("Namespace", projectNamespace));
             if (isResource) fb.Add(new XAttribute("Mapping", coupler.BrokerFbId));
             fb.Add(new XAttribute("x", (band.ColumnBaseX + layout.Geometry.ColumnPitchX * hosted.Count).ToString()),
                    new XAttribute("y", layout.RowY("Actuator").ToString()));
@@ -248,7 +249,8 @@ namespace CodeGen.Devices.RevPi
             return true;
         }
 
-        internal static void EmbedBridge(Coupler c, string resourceName, string fbtPath)
+        internal static void EmbedBridge(Coupler c, string resourceName, string fbtPath,
+            string projectNamespace)
         {
             if (!File.Exists(fbtPath)) return;
             // No PreserveWhitespace: saving re-indents so each FB lands on its own line, as EAE requires here.
@@ -275,10 +277,10 @@ namespace CodeGen.Devices.RevPi
             var sensors = c.Sensors.ToList();
             var coils = c.Coils.ToList();
             var (sa, st) = SymlinkBridge.Pick("SRC", sensors.Count);
-            Add(SymlinkBridge.BuildFb("", id++, uid++, Publisher, st, sa,
+            Add(SymlinkBridge.BuildFb("", projectNamespace, id++, uid++, Publisher, st, sa,
                 sensors.Select(s => s.Symlink(resourceName)).ToList(), BridgeX, BridgeY));
             var (ca, ct) = SymlinkBridge.Pick("DST", coils.Count);
-            Add(SymlinkBridge.BuildFb("", id++, uid++, Subscriber, ct, ca,
+            Add(SymlinkBridge.BuildFb("", projectNamespace, id++, uid++, Subscriber, ct, ca,
                 coils.Select(s => s.Symlink(resourceName)).ToList(), BridgeX + BridgeColumn, BridgeY));
             // A coil symlink carries no boundary event, so read and write must be re-requested on the
             // coupler's own bus cycle or the words freeze.
