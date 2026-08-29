@@ -8,6 +8,15 @@ namespace CodeGen.Models
         public string Name { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
         public string Type { get; set; } = string.Empty;
+
+        // WHAT this component is: Type resolved through Config/twin-schema.yml, which is the single
+        // owner of that answer. Every consumer asks the kind rather than re-reading the token, so none
+        // of them can classify the same component differently.
+        //
+        // Null means NOT YET RESOLVED. The reader stamps it while parsing; a component built in code
+        // is stamped by TwinModel.Build against the same declaration, so both entry points classify
+        // through one owner and a code-built twin cannot carry a kind no twin file could.
+        public ComponentKind? Kind { get; set; }
         // VueOne <VcID> hardware marker; used ONLY to narrowly identify the real UR3e task arm
         // (TemplateMap.IsRobotTaskArm). Empty when the XML omits it.
         public string VcID { get; set; } = string.Empty;
