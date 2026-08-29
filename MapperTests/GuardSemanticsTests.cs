@@ -92,7 +92,7 @@ namespace MapperTests
             try
             {
                 var ex = Assert.Throws<InvalidOperationException>(
-                    () => new CodeGen.IO.SystemXmlReader().ReadAllComponents(path));
+                    () => new CodeGen.IO.SystemXmlReader(TestConfig.Cfg.Twin).ReadAllComponents(path));
                 Assert.Contains("XOR", ex.Message, StringComparison.Ordinal);
                 Assert.Contains("ConditionGroup", ex.Message, StringComparison.Ordinal);
             }
@@ -107,7 +107,7 @@ namespace MapperTests
             System.IO.File.WriteAllText(path, Twin(groupOperator: ""));
             try
             {
-                var read = new CodeGen.IO.SystemXmlReader().ReadAllComponents(path);
+                var read = new CodeGen.IO.SystemXmlReader(TestConfig.Cfg.Twin).ReadAllComponents(path);
                 var guard = read.Single().States.First().Transitions.Single().Guard;
                 var any = Assert.IsType<ConditionExpr.Any>(guard);
                 Assert.Equal(2, any.Operands.Count);
