@@ -10,22 +10,6 @@ namespace CodeGen.Artefacts
     // whose UID is the parent folder GUID. Only opcua.xml is Mapper-written; EAE produces the rest on open.
     public static class OpcuaCompanionEmitter
     {
-        // The parameterless-configuration overloads are COMPATIBILITY ENTRY POINTS: the prebuilt VueOne
-        // runner links these exact signatures, so they cannot take a snapshot and read the shipped
-        // bundle themselves. Every in-process caller uses the cfg-carrying overload beside each, so the
-        // core never reaches a configuration global to render a companion document.
-        public static void EmitForArtefact(string artefactPath) =>
-            EmitForArtefact(SharedBundle(), artefactPath);
-
-        public static int EnsureOpcuaInAllResourceFolders(string eaeRoot) =>
-            EnsureOpcuaInAllResourceFolders(SharedBundle(), eaeRoot);
-
-        static CompilerConfiguration? SharedBundle()
-        {
-            try { return CompilerConfiguration.Load(MapperConfig.Load()); }
-            catch { return null; }   // fall back to the default template root
-        }
-
         // Writes opcua.xml into a {stem}/ folder beside the artefact (UID = container GUID).
         public static void EmitForArtefact(CompilerConfiguration? cfg, string artefactPath)
         {
