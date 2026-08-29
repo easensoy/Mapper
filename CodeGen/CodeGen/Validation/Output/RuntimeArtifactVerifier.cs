@@ -20,7 +20,8 @@ namespace CodeGen.Services
                 return 0;
 
             var sourceFbs = new List<SysresFbMirror.SyslayFb>();
-            try { sourceFbs = SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(syslayPath); }
+            try { sourceFbs = SysresFbMirror.ReadTopLevelFbsWithSystemModelFallback(
+                syslayPath, cfg.Generation.ProjectNamespace); }
             catch { return 0; }
 
             var syslayById = sourceFbs
