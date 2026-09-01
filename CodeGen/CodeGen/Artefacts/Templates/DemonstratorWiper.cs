@@ -99,11 +99,8 @@ namespace CodeGen.Services
 
         static string? ResolveIec61499Dir(string repoRoot)
         {
-            // Prefer /Demonstator/IEC61499 (the project's actual layout — the path typo is real).
-            var preferred = Path.Combine(repoRoot, "Demonstator", "IEC61499");
+            var preferred = Path.Combine(repoRoot, "Demonstrator", "IEC61499");
             if (Directory.Exists(preferred)) return preferred;
-            var alt = Path.Combine(repoRoot, "Demonstrator", "IEC61499");
-            if (Directory.Exists(alt)) return alt;
             return Directory.EnumerateDirectories(repoRoot, "IEC61499", SearchOption.AllDirectories)
                 .FirstOrDefault();
         }
@@ -295,7 +292,6 @@ namespace CodeGen.Services
             string? found = null;
             foreach (var candidate in new[]
             {
-                Path.Combine(repoRoot, "Demonstator", "HwConfiguration"),
                 Path.Combine(repoRoot, "Demonstrator", "HwConfiguration"),
             })
             {
@@ -441,10 +437,10 @@ namespace CodeGen.Services
 
         static void DeleteRepoRootScratch(string repoRoot, WipeReport report)
         {
-            // EAE/Mapper drop regenerable *.export/*.colors scratch at the repo root or Demonstator/.
+            // EAE/Mapper drop regenerable *.export/*.colors scratch at the repo root or Demonstrator/.
             var scratchPatterns = new[] { "*.export", "*.colors" };
             int n = 0;
-            foreach (var dir in new[] { repoRoot, Path.Combine(repoRoot, "Demonstator"), Path.Combine(repoRoot, "Demonstrator") })
+            foreach (var dir in new[] { repoRoot, Path.Combine(repoRoot, "Demonstrator") })
             {
                 if (!Directory.Exists(dir)) continue;
                 foreach (var pat in scratchPatterns)
